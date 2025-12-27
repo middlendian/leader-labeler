@@ -1,0 +1,79 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+  labels:
+    app: my-app
+spec:
+  replicas: 2  # Minimum for leader/follower pattern
+
+  # CRITICAL: Rolling update strategy for zero-downtime deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1         # Allow 1 extra pod during update (enables smooth transition)
+      maxUnavailable: 0   # Never have fewer than desired replicas
+
+  selector:
+    matchLabels:
+      app: my-app
+
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      serviceAccountName: leader-labeler
+      terminationGracePeriodSeconds: 30  # Sidecar uses this for draining timeout
+
+      containers:
+      # Example main application container
+      - name: app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+          name: http
+
+        # IMPORTANT: For traffic continuity during leader draining:
+        # Option A: Configure readiness probe to keep passing during SIGTERM
+        # Option B: Omit readiness probe (use only liveness)
+        # This ensures leader pod stays Ready and continues serving traffic
+        # while waiting for successor during graceful shutdown
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          # App should continue passing readiness during SIGTERM
+
+      # Leader-labeler sidecar
+      - name: leader-labeler
+        image: ghcr.io/middlendian/leader-labeler:latest
+        args:
+        - --election-name=my-app
+        # Optional: customize labels
+        # - --leadership-label=my-app/is-leader
+        # - --participation-label=my-app/participant
+        # Optional: tune timeouts
+        # - --lease-duration=15s
+        # - --renew-deadline=10s
+        # - --retry-period=2s
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
