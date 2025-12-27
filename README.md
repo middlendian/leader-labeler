@@ -36,19 +36,19 @@ Kubernetes for applications that:
 ### 1. Install RBAC permissions
 
 ```bash
-kubectl apply -f deploy/rbac.yaml
+kubectl apply -f example/rbac.yaml
 ```
 
 ### 2. Deploy your application with the sidecar
 
 ```bash
-kubectl apply -f deploy/deployment.yaml
+kubectl apply -f example/deployment.yaml
 ```
 
 ### 3. Create a Service that routes to the leader
 
 ```bash
-kubectl apply -f deploy/service.yaml
+kubectl apply -f example/service.yaml
 ```
 
 ### 4. Verify leader election
@@ -288,7 +288,7 @@ rules:
 Apply the included RBAC manifest:
 
 ```bash
-kubectl apply -f deploy/rbac.yaml
+kubectl apply -f example/rbac.yaml
 ```
 
 ## Troubleshooting
