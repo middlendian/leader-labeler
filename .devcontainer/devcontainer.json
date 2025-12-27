@@ -31,6 +31,8 @@
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "HISTFILE": "/commandhistory/.zsh_history",
+    "ZSH_THEME": "tjkirch",
+    "COLORTERM": "truecolor",
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
   },
   "mounts": [
