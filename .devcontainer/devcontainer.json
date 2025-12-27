@@ -37,6 +37,7 @@
     "source=${localWorkspaceFolder}/.devcontainer/mounts/.zsh_history,target=/home/vscode/.zsh_history,type=bind,consistency=delegateed",
     "source=${localWorkspaceFolder}/.claude,target=/home/vscode/.claude,type=bind,consistency=delegated"
   ],
+  "initializeCommand": "touch ${localWorkspaceFolder}/.devcontainer/mounts/.zsh_history",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace"
 }
