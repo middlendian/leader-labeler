@@ -125,6 +125,142 @@ func TestIsPodReady(t *testing.T) {
 	}
 }
 
+func TestParseConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		expectError bool
+		errorMsg    string
+		validate    func(*testing.T, *Config)
+	}{
+		{
+			name: "valid minimal config",
+			args: []string{
+				"--election-name=my-app",
+				"--pod-name=my-pod",
+				"--namespace=default",
+			},
+			expectError: false,
+			validate: func(t *testing.T, c *Config) {
+				if c.ElectionName != "my-app" {
+					t.Errorf("ElectionName = %v, expected my-app", c.ElectionName)
+				}
+				if c.PodName != "my-pod" {
+					t.Errorf("PodName = %v, expected my-pod", c.PodName)
+				}
+				if c.Namespace != "default" {
+					t.Errorf("Namespace = %v, expected default", c.Namespace)
+				}
+				// Check default labels are generated
+				if c.LeadershipLabel != "my-app/is-leader" {
+					t.Errorf("LeadershipLabel = %v, expected my-app/is-leader", c.LeadershipLabel)
+				}
+				if c.ParticipationLabel != "my-app/participant" {
+					t.Errorf("ParticipationLabel = %v, expected my-app/participant", c.ParticipationLabel)
+				}
+				// Check default durations
+				if c.LeaseDuration != 15*time.Second {
+					t.Errorf("LeaseDuration = %v, expected 15s", c.LeaseDuration)
+				}
+			},
+		},
+		{
+			name: "custom labels",
+			args: []string{
+				"--election-name=my-app",
+				"--pod-name=my-pod",
+				"--namespace=default",
+				"--leadership-label=custom/leader",
+				"--participation-label=custom/member",
+			},
+			expectError: false,
+			validate: func(t *testing.T, c *Config) {
+				if c.LeadershipLabel != "custom/leader" {
+					t.Errorf("LeadershipLabel = %v, expected custom/leader", c.LeadershipLabel)
+				}
+				if c.ParticipationLabel != "custom/member" {
+					t.Errorf("ParticipationLabel = %v, expected custom/member", c.ParticipationLabel)
+				}
+			},
+		},
+		{
+			name: "custom timeouts",
+			args: []string{
+				"--election-name=my-app",
+				"--pod-name=my-pod",
+				"--namespace=default",
+				"--lease-duration=30s",
+				"--renew-deadline=20s",
+				"--retry-period=5s",
+			},
+			expectError: false,
+			validate: func(t *testing.T, c *Config) {
+				if c.LeaseDuration != 30*time.Second {
+					t.Errorf("LeaseDuration = %v, expected 30s", c.LeaseDuration)
+				}
+				if c.RenewDeadline != 20*time.Second {
+					t.Errorf("RenewDeadline = %v, expected 20s", c.RenewDeadline)
+				}
+				if c.RetryPeriod != 5*time.Second {
+					t.Errorf("RetryPeriod = %v, expected 5s", c.RetryPeriod)
+				}
+			},
+		},
+		{
+			name:        "missing election-name",
+			args:        []string{"--pod-name=my-pod", "--namespace=default"},
+			expectError: true,
+			errorMsg:    "--election-name is required",
+		},
+		{
+			name:        "missing pod-name",
+			args:        []string{"--election-name=my-app", "--namespace=default"},
+			expectError: true,
+			errorMsg:    "--pod-name is required (or set POD_NAME env var)",
+		},
+		{
+			name:        "missing namespace",
+			args:        []string{"--election-name=my-app", "--pod-name=my-pod"},
+			expectError: true,
+			errorMsg:    "--namespace is required (or set POD_NAMESPACE env var)",
+		},
+		{
+			name:        "invalid flag",
+			args:        []string{"--election-name=my-app", "--invalid-flag=value"},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := parseConfig(tt.args)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got nil")
+				} else if tt.errorMsg != "" && err.Error() != tt.errorMsg {
+					t.Errorf("error = %v, expected %v", err.Error(), tt.errorMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if config == nil {
+				t.Errorf("expected config but got nil")
+				return
+			}
+
+			if tt.validate != nil {
+				tt.validate(t, config)
+			}
+		})
+	}
+}
+
 func TestApplyDefaultLabels(t *testing.T) {
 	tests := []struct {
 		name                       string

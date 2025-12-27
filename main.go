@@ -102,40 +102,55 @@ func main() {
 	slog.Info("leader-labeler terminated")
 }
 
-func parseFlags() {
-	flag.StringVar(&cfg.ElectionName, "election-name", "", "Name of the election (required)")
-	flag.StringVar(&cfg.PodName, "pod-name", os.Getenv("POD_NAME"), "Name of this pod")
-	flag.StringVar(&cfg.Namespace, "namespace", os.Getenv("POD_NAMESPACE"), "Namespace of this pod")
-	flag.StringVar(&cfg.LeadershipLabel, "leadership-label", "", "Label for leader status (default: <election-name>/is-leader)")
-	flag.StringVar(&cfg.ParticipationLabel, "participation-label", "", "Label for participants (default: <election-name>/participant)")
-	flag.DurationVar(&cfg.LeaseDuration, "lease-duration", 15*time.Second, "Lease duration")
-	flag.DurationVar(&cfg.RenewDeadline, "renew-deadline", 10*time.Second, "Renew deadline")
-	flag.DurationVar(&cfg.RetryPeriod, "retry-period", 2*time.Second, "Retry period")
-	flag.Parse()
+// parseConfig parses command-line arguments from a string slice and returns a Config.
+func parseConfig(args []string) (*Config, error) {
+	fs := flag.NewFlagSet("leader-labeler", flag.ContinueOnError)
+
+	c := &Config{}
+
+	// Define flags
+	fs.StringVar(&c.ElectionName, "election-name", "", "Name of the election (required)")
+	fs.StringVar(&c.PodName, "pod-name", os.Getenv("POD_NAME"), "Name of this pod")
+	fs.StringVar(&c.Namespace, "namespace", os.Getenv("POD_NAMESPACE"), "Namespace of this pod")
+	fs.StringVar(&c.LeadershipLabel, "leadership-label", "", "Label for leader status (default: <election-name>/is-leader)")
+	fs.StringVar(&c.ParticipationLabel, "participation-label", "", "Label for participants (default: <election-name>/participant)")
+	fs.DurationVar(&c.LeaseDuration, "lease-duration", 15*time.Second, "Lease duration")
+	fs.DurationVar(&c.RenewDeadline, "renew-deadline", 10*time.Second, "Renew deadline")
+	fs.DurationVar(&c.RetryPeriod, "retry-period", 2*time.Second, "Retry period")
+
+	// Parse arguments
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
 
 	// Validate required flags
-	if cfg.ElectionName == "" {
-		fmt.Fprintf(os.Stderr, "Error: --election-name is required\n")
-		flag.Usage()
-		os.Exit(1)
+	if c.ElectionName == "" {
+		return nil, fmt.Errorf("--election-name is required")
 	}
-	if cfg.PodName == "" {
-		fmt.Fprintf(os.Stderr, "Error: --pod-name is required (or set POD_NAME env var)\n")
-		flag.Usage()
-		os.Exit(1)
+	if c.PodName == "" {
+		return nil, fmt.Errorf("--pod-name is required (or set POD_NAME env var)")
 	}
-	if cfg.Namespace == "" {
-		fmt.Fprintf(os.Stderr, "Error: --namespace is required (or set POD_NAMESPACE env var)\n")
-		flag.Usage()
-		os.Exit(1)
+	if c.Namespace == "" {
+		return nil, fmt.Errorf("--namespace is required (or set POD_NAMESPACE env var)")
 	}
 
 	// Set default labels if not provided
-	cfg.LeadershipLabel, cfg.ParticipationLabel = determineLabelNames(
-		cfg.ElectionName,
-		cfg.LeadershipLabel,
-		cfg.ParticipationLabel,
+	c.LeadershipLabel, c.ParticipationLabel = determineLabelNames(
+		c.ElectionName,
+		c.LeadershipLabel,
+		c.ParticipationLabel,
 	)
+
+	return c, nil
+}
+
+func parseFlags() {
+	c, err := parseConfig(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	cfg = *c
 }
 
 // determineLabelNames generates default label names based on the election name if custom labels aren't provided.
