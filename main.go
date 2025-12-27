@@ -131,12 +131,22 @@ func parseFlags() {
 	}
 
 	// Set default labels if not provided
-	if cfg.LeadershipLabel == "" {
-		cfg.LeadershipLabel = cfg.ElectionName + "/is-leader"
+	cfg.LeadershipLabel, cfg.ParticipationLabel = determineLabelNames(
+		cfg.ElectionName,
+		cfg.LeadershipLabel,
+		cfg.ParticipationLabel,
+	)
+}
+
+// determineLabelNames generates default label names based on the election name if custom labels aren't provided.
+func determineLabelNames(electionName, leadershipLabel, participationLabel string) (string, string) {
+	if leadershipLabel == "" {
+		leadershipLabel = electionName + "/is-leader"
 	}
-	if cfg.ParticipationLabel == "" {
-		cfg.ParticipationLabel = cfg.ElectionName + "/participant"
+	if participationLabel == "" {
+		participationLabel = electionName + "/participant"
 	}
+	return leadershipLabel, participationLabel
 }
 
 func setupLogger() {

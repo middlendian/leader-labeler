@@ -125,22 +125,52 @@ func TestIsPodReady(t *testing.T) {
 	}
 }
 
-func TestDefaultLabelGeneration(t *testing.T) {
+func TestApplyDefaultLabels(t *testing.T) {
 	tests := []struct {
 		name                       string
 		electionName               string
+		inputLeadershipLabel       string
+		inputParticipationLabel    string
 		expectedLeadershipLabel    string
 		expectedParticipationLabel string
 	}{
 		{
-			name:                       "simple election name",
+			name:                       "generates default labels when empty",
 			electionName:               "my-app",
+			inputLeadershipLabel:       "",
+			inputParticipationLabel:    "",
 			expectedLeadershipLabel:    "my-app/is-leader",
 			expectedParticipationLabel: "my-app/participant",
 		},
 		{
-			name:                       "election name with namespace-like prefix",
+			name:                       "preserves custom leadership label",
+			electionName:               "my-app",
+			inputLeadershipLabel:       "custom/leader",
+			inputParticipationLabel:    "",
+			expectedLeadershipLabel:    "custom/leader",
+			expectedParticipationLabel: "my-app/participant",
+		},
+		{
+			name:                       "preserves custom participation label",
+			electionName:               "my-app",
+			inputLeadershipLabel:       "",
+			inputParticipationLabel:    "custom/member",
+			expectedLeadershipLabel:    "my-app/is-leader",
+			expectedParticipationLabel: "custom/member",
+		},
+		{
+			name:                       "preserves both custom labels",
+			electionName:               "my-app",
+			inputLeadershipLabel:       "custom/leader",
+			inputParticipationLabel:    "custom/member",
+			expectedLeadershipLabel:    "custom/leader",
+			expectedParticipationLabel: "custom/member",
+		},
+		{
+			name:                       "handles election name with dashes",
 			electionName:               "prod-service",
+			inputLeadershipLabel:       "",
+			inputParticipationLabel:    "",
 			expectedLeadershipLabel:    "prod-service/is-leader",
 			expectedParticipationLabel: "prod-service/participant",
 		},
@@ -148,9 +178,11 @@ func TestDefaultLabelGeneration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate label generation logic from parseFlags()
-			leadershipLabel := tt.electionName + "/is-leader"
-			participationLabel := tt.electionName + "/participant"
+			leadershipLabel, participationLabel := determineLabelNames(
+				tt.electionName,
+				tt.inputLeadershipLabel,
+				tt.inputParticipationLabel,
+			)
 
 			if leadershipLabel != tt.expectedLeadershipLabel {
 				t.Errorf("leadershipLabel = %v, expected %v", leadershipLabel, tt.expectedLeadershipLabel)
