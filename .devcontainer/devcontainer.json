@@ -30,15 +30,13 @@
   "remoteUser": "vscode",
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
-    "HISTFILE": "/commandhistory/.zsh_history",
-    "ZSH_THEME": "tjkirch",
     "COLORTERM": "truecolor",
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
   },
   "mounts": [
-    "source=${devcontainerId}-commandhistory,target=/commandhistory,type=volume",
-    "source=${devcontainerId}-claude-config,target=/home/vscode/.claude,type=volume"
+    "source=${localWorkspaceFolder}/.devcontainer/mounts/.zsh_history,target=/home/vscode/.zsh_history,type=bind,consistency=delegateed",
+    "source=${localWorkspaceFolder}/.claude,target=/home/vscode/.claude,type=bind,consistency=delegated"
   ],
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace",
+  "workspaceFolder": "/workspace"
 }
