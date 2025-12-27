@@ -392,7 +392,10 @@ func handleShutdown(ctx context.Context, cancel context.CancelFunc, terminationG
 	// FIRST: Remove participation label immediately
 	removeCtx, removeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer removeCancel()
-	removeParticipationLabel(removeCtx, cfg.PodName)
+	if err := removeParticipationLabel(removeCtx, cfg.PodName); err != nil {
+		slog.Error("failed to remove participation label during shutdown", "error", err)
+		// Continue with shutdown anyway - don't block on label removal
+	}
 
 	// Check if we're the leader
 	if !isLeader.Load() {
