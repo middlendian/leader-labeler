@@ -59,15 +59,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Setup context for application lifecycle
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Get this pod object
-	pod, err := client.CoreV1().Pods(cfg.Namespace).Get(context.Background(), cfg.PodName, metav1.GetOptions{})
+	pod, err := client.CoreV1().Pods(cfg.Namespace).Get(ctx, cfg.PodName, metav1.GetOptions{})
 	if err != nil {
 		slog.Error("failed to get pod", "error", err, "pod_name", cfg.PodName)
 		os.Exit(1)
 	}
 
 	// Wait for this pod to become Ready
-	if err := waitForReadyPod(context.Background(), pod.Name); err != nil {
+	if err := waitForReadyPod(ctx, pod.Name); err != nil {
 		slog.Error("failed waiting for pod readiness", "error", err)
 		os.Exit(1)
 	}
@@ -78,14 +82,10 @@ func main() {
 		"termination_grace_period_seconds", terminationGracePeriod.Seconds())
 
 	// Apply participation label to this pod
-	if err := applyParticipationLabel(context.Background(), pod.Name); err != nil {
+	if err := applyParticipationLabel(ctx, pod.Name); err != nil {
 		slog.Error("failed to apply participation label", "error", err)
 		os.Exit(1)
 	}
-
-	// Setup context for leader election
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	// Setup signal handlers
 	sigChan := make(chan os.Signal, 1)
@@ -390,7 +390,8 @@ func handleShutdown(ctx context.Context, cancel context.CancelFunc, terminationG
 	slog.Info("shutdown signal received, removing participation label")
 
 	// FIRST: Remove participation label immediately
-	removeCtx, removeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Derive from parent context but with our own timeout to ensure it completes
+	removeCtx, removeCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer removeCancel()
 	if err := removeParticipationLabel(removeCtx, cfg.PodName); err != nil {
 		slog.Error("failed to remove participation label during shutdown", "error", err)
