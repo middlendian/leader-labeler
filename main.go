@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection"
@@ -76,10 +78,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Extract termination grace period for draining timeout
-	terminationGracePeriod := getTerminationGracePeriod(pod)
-	slog.Info("pod ready, joining election",
-		"termination_grace_period_seconds", terminationGracePeriod.Seconds())
+	slog.Info("pod ready, joining election")
 
 	// Apply participation label to this pod
 	if err := applyParticipationLabel(ctx, pod.Name); err != nil {
@@ -93,7 +92,7 @@ func main() {
 
 	go func() {
 		<-sigChan
-		handleShutdown(ctx, cancel, terminationGracePeriod)
+		handleShutdown(ctx, cancel)
 	}()
 
 	// Run leader election (blocks until shutdown)
@@ -217,14 +216,6 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
-func getTerminationGracePeriod(pod *corev1.Pod) time.Duration {
-	if pod.Spec.TerminationGracePeriodSeconds != nil {
-		return time.Duration(*pod.Spec.TerminationGracePeriodSeconds) * time.Second
-	}
-	// Default to 30s (Kubernetes default)
-	return 30 * time.Second
-}
-
 func applyParticipationLabel(ctx context.Context, podName string) error {
 	pod, err := client.CoreV1().Pods(cfg.Namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
@@ -278,51 +269,134 @@ func removeParticipationLabel(ctx context.Context, podName string) error {
 	return nil
 }
 
-func runLeaderElection(ctx context.Context) {
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta: metav1.ObjectMeta{
-			Name:      cfg.ElectionName,
-			Namespace: cfg.Namespace,
-		},
-		Client: client.CoordinationV1(),
-		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: cfg.PodName,
-		},
-	}
-
-	// Reconciliation context and cancel function for leader
-	var reconcileCtx context.Context
-	var reconcileCancel context.CancelFunc
-
-	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
-		Lock:            lock,
-		ReleaseOnCancel: true,
-		LeaseDuration:   cfg.LeaseDuration,
-		RenewDeadline:   cfg.RenewDeadline,
-		RetryPeriod:     cfg.RetryPeriod,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				isLeader.Store(true)
-				slog.Info("became leader", "pod_name", cfg.PodName)
-
-				// Start reconciliation loop
-				reconcileCtx, reconcileCancel = context.WithCancel(ctx)
-				go reconcileLabels(reconcileCtx)
-			},
-			OnStoppedLeading: func() {
-				if reconcileCancel != nil {
-					reconcileCancel()
-				}
-				isLeader.Store(false)
-				slog.Warn("lost leadership", "pod_name", cfg.PodName)
-			},
-			OnNewLeader: func(identity string) {
-				if identity != cfg.PodName {
-					slog.Info("new leader elected", "leader_identity", identity)
-				}
-			},
-		},
+// watchLeaseForEarlyElection monitors the Lease object and triggers early election
+// attempts when the lease holder is cleared or the lease is deleted.
+func watchLeaseForEarlyElection(ctx context.Context, triggerChan chan<- struct{}) {
+	watcher, err := client.CoordinationV1().Leases(cfg.Namespace).Watch(ctx, metav1.ListOptions{
+		FieldSelector: "metadata.name=" + cfg.ElectionName,
 	})
+	if err != nil {
+		slog.Warn("failed to start lease watcher, falling back to polling", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				slog.Debug("lease watcher channel closed")
+				return
+			}
+
+			// Only trigger for non-leaders when lease becomes available
+			if isLeader.Load() {
+				continue
+			}
+
+			if event.Type == watch.Deleted {
+				slog.Info("lease deleted, triggering early election")
+				select {
+				case triggerChan <- struct{}{}:
+				default: // Don't block if channel full
+				}
+				continue
+			}
+
+			if event.Type == watch.Modified {
+				lease, ok := event.Object.(*coordinationv1.Lease)
+				if !ok {
+					continue
+				}
+				if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
+					slog.Info("lease holder cleared, triggering early election")
+					select {
+					case triggerChan <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}
+	}
+}
+
+func runLeaderElection(ctx context.Context) {
+	triggerChan := make(chan struct{}, 1)
+
+	// Start the lease watcher for early election triggering
+	go watchLeaseForEarlyElection(ctx, triggerChan)
+
+	for ctx.Err() == nil {
+		// Create a cancellable context for this election cycle
+		electionCtx, electionCancel := context.WithCancel(ctx)
+
+		// Goroutine to cancel election on early trigger (for non-leaders only)
+		go func() {
+			select {
+			case <-electionCtx.Done():
+				return
+			case <-triggerChan:
+				if !isLeader.Load() {
+					slog.Debug("early election trigger received, restarting election cycle")
+					electionCancel()
+				}
+			}
+		}()
+
+		lock := &resourcelock.LeaseLock{
+			LeaseMeta: metav1.ObjectMeta{
+				Name:      cfg.ElectionName,
+				Namespace: cfg.Namespace,
+			},
+			Client: client.CoordinationV1(),
+			LockConfig: resourcelock.ResourceLockConfig{
+				Identity: cfg.PodName,
+			},
+		}
+
+		// Reconciliation context and cancel function for leader
+		var reconcileCtx context.Context
+		var reconcileCancel context.CancelFunc
+
+		leaderelection.RunOrDie(electionCtx, leaderelection.LeaderElectionConfig{
+			Lock:            lock,
+			ReleaseOnCancel: true,
+			LeaseDuration:   cfg.LeaseDuration,
+			RenewDeadline:   cfg.RenewDeadline,
+			RetryPeriod:     cfg.RetryPeriod,
+			Callbacks: leaderelection.LeaderCallbacks{
+				OnStartedLeading: func(ctx context.Context) {
+					isLeader.Store(true)
+					slog.Info("became leader", "pod_name", cfg.PodName)
+
+					// Start reconciliation loop
+					reconcileCtx, reconcileCancel = context.WithCancel(ctx)
+					go reconcileLabels(reconcileCtx)
+				},
+				OnStoppedLeading: func() {
+					if reconcileCancel != nil {
+						reconcileCancel()
+					}
+					isLeader.Store(false)
+					slog.Warn("lost leadership", "pod_name", cfg.PodName)
+				},
+				OnNewLeader: func(identity string) {
+					if identity != cfg.PodName {
+						slog.Info("new leader elected", "leader_identity", identity)
+					}
+				},
+			},
+		})
+
+		electionCancel() // Clean up election context
+
+		// Brief pause before retrying (if not shutting down)
+		if ctx.Err() == nil {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }
 
 func reconcileLabels(ctx context.Context) {
@@ -411,63 +485,16 @@ func labelPod(ctx context.Context, podName string, isLeaderPod bool) error {
 	return nil
 }
 
-func handleShutdown(ctx context.Context, cancel context.CancelFunc, terminationGracePeriod time.Duration) {
+func handleShutdown(ctx context.Context, cancel context.CancelFunc) {
 	slog.Info("shutdown signal received, removing participation label")
 
-	// FIRST: Remove participation label immediately
-	// Derive from parent context but with our own timeout to ensure it completes
+	// Remove participation label immediately
 	removeCtx, removeCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer removeCancel()
 	if err := removeParticipationLabel(removeCtx, cfg.PodName); err != nil {
 		slog.Error("failed to remove participation label during shutdown", "error", err)
-		// Continue with shutdown anyway - don't block on label removal
 	}
 
-	// Check if we're the leader
-	if !isLeader.Load() {
-		// Follower shutdown: terminate immediately
-		slog.Info("follower shutdown, terminating immediately")
-		cancel()
-		return
-	}
-
-	// Leader shutdown: wait for successor
-	slog.Info("leader shutdown, entering drain mode",
-		"drain_timeout_seconds", terminationGracePeriod.Seconds())
-
-	drainTimeout := time.After(terminationGracePeriod)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-drainTimeout:
-			slog.Warn("drain timeout exceeded, forcing shutdown",
-				"timeout_seconds", terminationGracePeriod.Seconds())
-			cancel()
-			return
-
-		case <-ticker.C:
-			// Count remaining participants (excluding self - we already removed our label)
-			labelSelector := fmt.Sprintf("%s=true", cfg.ParticipationLabel)
-			pods, err := client.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{
-				LabelSelector: labelSelector,
-			})
-			if err != nil {
-				slog.Error("failed to list participants during drain", "error", err)
-				continue
-			}
-
-			participantCount := len(pods.Items)
-			if participantCount > 0 {
-				slog.Info("successor participant found, releasing leadership",
-					"participant_count", participantCount)
-				cancel()
-				return
-			}
-
-			slog.Debug("waiting for successor participant",
-				"participant_count", participantCount)
-		}
-	}
+	slog.Info("releasing leadership and terminating")
+	cancel()
 }

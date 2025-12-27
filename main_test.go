@@ -7,51 +7,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func TestGetTerminationGracePeriod(t *testing.T) {
-	tests := []struct {
-		name     string
-		pod      *corev1.Pod
-		expected time.Duration
-	}{
-		{
-			name: "with termination grace period set",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					TerminationGracePeriodSeconds: int64Ptr(60),
-				},
-			},
-			expected: 60 * time.Second,
-		},
-		{
-			name: "with nil termination grace period (default)",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					TerminationGracePeriodSeconds: nil,
-				},
-			},
-			expected: 30 * time.Second,
-		},
-		{
-			name: "with zero termination grace period",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					TerminationGracePeriodSeconds: int64Ptr(0),
-				},
-			},
-			expected: 0 * time.Second,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := getTerminationGracePeriod(tt.pod)
-			if result != tt.expected {
-				t.Errorf("getTerminationGracePeriod() = %v, expected %v", result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestIsPodReady(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -364,9 +319,4 @@ func TestConfigurationDefaults(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper function to create *int64
-func int64Ptr(i int64) *int64 {
-	return &i
 }
