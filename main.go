@@ -269,9 +269,10 @@ func formatPermissionError(missing []PermissionCheck) error {
 	// Group by resource type for cleaner output
 	var podVerbs, leaseVerbs []string
 	for _, p := range missing {
-		if p.Resource == "pods" {
+		switch p.Resource {
+		case "pods":
 			podVerbs = append(podVerbs, p.Verb)
-		} else if p.Resource == "leases" {
+		case "leases":
 			leaseVerbs = append(leaseVerbs, p.Verb)
 		}
 	}
