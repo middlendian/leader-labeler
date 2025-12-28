@@ -231,17 +231,17 @@ func TestReconcileLabels(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
 
-			err := ReconcileLabels(ctx, client, cfg)
+			err := ApplyAllLabels(ctx, client, cfg)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Error("ReconcileLabels() expected error, got nil")
+					t.Error("ApplyAllLabels() expected error, got nil")
 				}
 				return
 			}
 
 			if err != nil {
-				t.Errorf("ReconcileLabels() unexpected error: %v", err)
+				t.Errorf("ApplyAllLabels() unexpected error: %v", err)
 				return
 			}
 
@@ -306,9 +306,9 @@ func TestReconcileLabels_SkipsCorrectlyLabeledPods(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
-	err := ReconcileLabels(ctx, client, cfg)
+	err := ApplyAllLabels(ctx, client, cfg)
 	if err != nil {
-		t.Fatalf("ReconcileLabels() error: %v", err)
+		t.Fatalf("ApplyAllLabels() error: %v", err)
 	}
 
 	// Only leader-pod should be patched, already-false should be skipped

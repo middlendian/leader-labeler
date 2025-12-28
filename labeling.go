@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// Labeling constants
 const (
 	LabelRetryAttempts = 3
 )
@@ -65,9 +64,9 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 	return nil
 }
 
-// ReconcileLabels sets is-leader=true on self, is-leader=false on all other participants.
+// ApplyAllLabels sets is-leader=true on self, is-leader=false on all other participants.
 // Called once when this pod becomes leader. Returns an error if labeling self fails.
-func ReconcileLabels(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
+func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
 	// List all pods with the leadership label (any value)
 	labelSelector := cfg.LeadershipLabel
 	pods, err := client.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{

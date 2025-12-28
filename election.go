@@ -76,8 +76,8 @@ func runLeaderElectionLoop(ctx context.Context, client kubernetes.Interface, cfg
 				OnStartedLeading: func(ctx context.Context) {
 					slog.Info("became leader", "pod_name", cfg.PodName)
 
-					// Reconcile all participants (sets is-leader=true on self, false on others)
-					if err := ReconcileLabels(ctx, client, cfg); err != nil {
+					// Apply labels to all participants (sets is-leader=true on self, false on others)
+					if err := ApplyAllLabels(ctx, client, cfg); err != nil {
 						slog.Error("failed to reconcile labels, releasing leadership", "error", err)
 						electionCancel()
 						return
