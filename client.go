@@ -15,14 +15,6 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// PermissionCheck describes a single RBAC permission to validate
-type PermissionCheck struct {
-	Resource     string
-	APIGroup     string
-	Verb         string
-	ResourceName string // optional: specific resource name (e.g., lease name)
-}
-
 // NewKubernetesClient creates an in-cluster Kubernetes client and validates RBAC permissions.
 // It logs errors before returning them.
 func NewKubernetesClient(ctx context.Context, cfg *Config) (kubernetes.Interface, error) {
@@ -53,6 +45,14 @@ func buildClient() (kubernetes.Interface, error) {
 	return clientset, nil
 }
 
+// permissionCheck describes a single RBAC permission to validate
+type permissionCheck struct {
+	Resource     string
+	APIGroup     string
+	Verb         string
+	ResourceName string // optional: specific resource name (e.g., lease name)
+}
+
 // validatePermissions checks that the service account has all required RBAC permissions.
 // It uses SelfSubjectAccessReview to verify each permission before the application starts.
 // Returns an error with detailed remediation instructions if any permission is missing.
@@ -60,7 +60,7 @@ func validatePermissions(ctx context.Context, client kubernetes.Interface, cfg *
 	slog.Info("validating RBAC permissions")
 
 	// Define all required permissions
-	checks := []PermissionCheck{
+	checks := []permissionCheck{
 		// Pod permissions (core API group)
 		{Resource: "pods", APIGroup: "", Verb: "get"},
 		{Resource: "pods", APIGroup: "", Verb: "list"},
@@ -71,7 +71,7 @@ func validatePermissions(ctx context.Context, client kubernetes.Interface, cfg *
 		{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "update", ResourceName: cfg.ElectionName},
 	}
 
-	var missingPermissions []PermissionCheck
+	var missingPermissions []permissionCheck
 
 	for _, check := range checks {
 		allowed, err := checkPermission(ctx, client, cfg, check)
@@ -96,11 +96,11 @@ func validatePermissions(ctx context.Context, client kubernetes.Interface, cfg *
 
 // checkPermission performs a SelfSubjectAccessReview for a single permission.
 // Returns (true, nil) if allowed, (false, nil) if denied, or (false, error) on failure.
-func checkPermission(ctx context.Context, client kubernetes.Interface, cfg *Config, check PermissionCheck) (bool, error) {
+func checkPermission(ctx context.Context, client kubernetes.Interface, cfg *Config, check permissionCheck) (bool, error) {
 	review := &authorizationv1.SelfSubjectAccessReview{
 		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Namespace: cfg.Namespace,
+				Namespace: cfg.PodNamespace,
 				Verb:      check.Verb,
 				Group:     check.APIGroup,
 				Resource:  check.Resource,
@@ -129,7 +129,7 @@ func checkPermission(ctx context.Context, client kubernetes.Interface, cfg *Conf
 }
 
 // formatPermissionError creates a detailed error message with remediation instructions.
-func formatPermissionError(missing []PermissionCheck, cfg *Config) error {
+func formatPermissionError(missing []permissionCheck, cfg *Config) error {
 	var sb strings.Builder
 
 	sb.WriteString("missing required RBAC permissions:\n\n")
@@ -152,7 +152,7 @@ func formatPermissionError(missing []PermissionCheck, cfg *Config) error {
 		sb.WriteString(fmt.Sprintf("  - leases (coordination.k8s.io): %s\n", strings.Join(leaseVerbs, ", ")))
 	}
 
-	sb.WriteString(fmt.Sprintf("\nNamespace: %s\n", cfg.Namespace))
+	sb.WriteString(fmt.Sprintf("\nNamespace: %s\n", cfg.PodNamespace))
 	sb.WriteString("\nTo fix this, ensure the ServiceAccount has a Role and RoleBinding with the required permissions.\n")
 	sb.WriteString("Example Role rules:\n\n")
 

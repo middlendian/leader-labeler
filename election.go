@@ -24,7 +24,7 @@ const (
 func RunElection(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
 	slog.Info("starting leader-labeler",
 		"election_name", cfg.ElectionName,
-		"namespace", cfg.Namespace,
+		"namespace", cfg.PodNamespace,
 		"pod_name", cfg.PodName)
 
 	// Wait for this pod to become Ready
@@ -56,7 +56,7 @@ func runLeaderElectionLoop(ctx context.Context, client kubernetes.Interface, cfg
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{
 				Name:      cfg.ElectionName,
-				Namespace: cfg.Namespace,
+				Namespace: cfg.PodNamespace,
 			},
 			Client: client.CoordinationV1(),
 			LockConfig: resourcelock.ResourceLockConfig{
@@ -68,8 +68,8 @@ func runLeaderElectionLoop(ctx context.Context, client kubernetes.Interface, cfg
 			Lock:            lock,
 			ReleaseOnCancel: true,
 			LeaseDuration:   cfg.LeaseDuration,
-			RenewDeadline:   cfg.RenewDeadline,
-			RetryPeriod:     cfg.RetryPeriod,
+			RenewDeadline:   cfg.TimeoutDeadline,
+			RetryPeriod:     cfg.RetryInterval,
 			Callbacks: leaderelection.LeaderCallbacks{
 				OnStartedLeading: func(ctx context.Context) {
 					slog.Info("became leader", "pod_name", cfg.PodName)
@@ -110,13 +110,13 @@ func waitForReadyPod(ctx context.Context, client kubernetes.Interface, cfg *Conf
 	slog.Info("waiting for pod to become ready", "pod_name", cfg.PodName)
 
 	// Check immediately first
-	pod, err := client.CoreV1().Pods(cfg.Namespace).Get(ctx, cfg.PodName, metav1.GetOptions{})
+	pod, err := client.CoreV1().Pods(cfg.PodNamespace).Get(ctx, cfg.PodName, metav1.GetOptions{})
 	if err == nil && isPodReady(pod) {
 		slog.Info("pod is ready", "pod_name", cfg.PodName)
 		return nil
 	}
 
-	ticker := time.NewTicker(cfg.RetryPeriod)
+	ticker := time.NewTicker(cfg.RetryInterval)
 	defer ticker.Stop()
 
 	for {
@@ -124,7 +124,7 @@ func waitForReadyPod(ctx context.Context, client kubernetes.Interface, cfg *Conf
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			pod, err := client.CoreV1().Pods(cfg.Namespace).Get(ctx, cfg.PodName, metav1.GetOptions{})
+			pod, err := client.CoreV1().Pods(cfg.PodNamespace).Get(ctx, cfg.PodName, metav1.GetOptions{})
 			if err != nil {
 				slog.Warn("failed to get pod while waiting for readiness", "error", err)
 				continue

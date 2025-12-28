@@ -137,9 +137,9 @@ func TestWaitForReadyPod(t *testing.T) {
 			client := fake.NewClientset(pod)
 
 			cfg := &Config{
-				PodName:     "test-pod",
-				Namespace:   "default",
-				RetryPeriod: 10 * time.Millisecond,
+				PodName:       "test-pod",
+				PodNamespace:  "default",
+				RetryInterval: 10 * time.Millisecond,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -182,9 +182,9 @@ func TestWaitForReadyPod_BecomesReadyAfterPolling(t *testing.T) {
 	client := fake.NewClientset(pod)
 
 	cfg := &Config{
-		PodName:     "test-pod",
-		Namespace:   "default",
-		RetryPeriod: 10 * time.Millisecond,
+		PodName:       "test-pod",
+		PodNamespace:  "default",
+		RetryInterval: 10 * time.Millisecond,
 	}
 
 	// Make the pod ready after a short delay
@@ -226,12 +226,12 @@ func TestRunElection_InitialSetup(t *testing.T) {
 
 	cfg := &Config{
 		PodName:         "test-pod",
-		Namespace:       "default",
+		PodNamespace:    "default",
 		ElectionName:    "test-election",
 		LeadershipLabel: "test/is-leader",
 		LeaseDuration:   15 * time.Second,
-		RenewDeadline:   10 * time.Second,
-		RetryPeriod:     2 * time.Second,
+		TimeoutDeadline: 10 * time.Second,
+		RetryInterval:   2 * time.Second,
 	}
 
 	// Cancel context immediately to exit after initial setup
@@ -281,9 +281,9 @@ func TestWaitForReadyPod_RetriesOnGetError(t *testing.T) {
 	})
 
 	cfg := &Config{
-		PodName:     "test-pod",
-		Namespace:   "default",
-		RetryPeriod: 10 * time.Millisecond,
+		PodName:       "test-pod",
+		PodNamespace:  "default",
+		RetryInterval: 10 * time.Millisecond,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -320,12 +320,12 @@ func TestRunElection_WaitForReadyFails(t *testing.T) {
 
 	cfg := &Config{
 		PodName:         "test-pod",
-		Namespace:       "default",
+		PodNamespace:    "default",
 		ElectionName:    "test-election",
 		LeadershipLabel: "test/is-leader",
 		LeaseDuration:   15 * time.Second,
-		RenewDeadline:   10 * time.Second,
-		RetryPeriod:     10 * time.Millisecond,
+		TimeoutDeadline: 10 * time.Second,
+		RetryInterval:   10 * time.Millisecond,
 	}
 
 	// Use a short timeout - pod will never become ready
@@ -367,12 +367,12 @@ func TestRunElection_InitialLabelFails(t *testing.T) {
 
 	cfg := &Config{
 		PodName:         "test-pod",
-		Namespace:       "default",
+		PodNamespace:    "default",
 		ElectionName:    "test-election",
 		LeadershipLabel: "test/is-leader",
 		LeaseDuration:   15 * time.Second,
-		RenewDeadline:   50 * time.Millisecond, // Short deadline for faster test
-		RetryPeriod:     10 * time.Millisecond,
+		TimeoutDeadline: 50 * time.Millisecond, // Short deadline for faster test
+		RetryInterval:   10 * time.Millisecond,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -405,12 +405,12 @@ func TestRunElection_LeadershipAcquisition(t *testing.T) {
 
 	cfg := &Config{
 		PodName:         "test-pod",
-		Namespace:       "default",
+		PodNamespace:    "default",
 		ElectionName:    "test-election",
 		LeadershipLabel: "test/is-leader",
 		LeaseDuration:   1 * time.Second,
-		RenewDeadline:   800 * time.Millisecond,
-		RetryPeriod:     200 * time.Millisecond,
+		TimeoutDeadline: 800 * time.Millisecond,
+		RetryInterval:   200 * time.Millisecond,
 	}
 
 	// Run election briefly, then cancel to check state
@@ -468,12 +468,12 @@ func TestRunElection_LeadershipAcquisition_TrackPatches(t *testing.T) {
 
 	cfg := &Config{
 		PodName:         "test-pod",
-		Namespace:       "default",
+		PodNamespace:    "default",
 		ElectionName:    "test-election",
 		LeadershipLabel: "test/is-leader",
 		LeaseDuration:   1 * time.Second,
-		RenewDeadline:   800 * time.Millisecond,
-		RetryPeriod:     200 * time.Millisecond,
+		TimeoutDeadline: 800 * time.Millisecond,
+		RetryInterval:   200 * time.Millisecond,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -565,12 +565,12 @@ func TestRunElection_ApplyAllLabelsFails_ReleasesLeadership(t *testing.T) {
 
 	cfg := &Config{
 		PodName:         "leader-pod",
-		Namespace:       "default",
+		PodNamespace:    "default",
 		ElectionName:    "test-election",
 		LeadershipLabel: "test/is-leader",
 		LeaseDuration:   1 * time.Second,
-		RenewDeadline:   100 * time.Millisecond, // Short deadline for quick failure
-		RetryPeriod:     20 * time.Millisecond,
+		TimeoutDeadline: 100 * time.Millisecond, // Short deadline for quick failure
+		RetryInterval:   20 * time.Millisecond,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

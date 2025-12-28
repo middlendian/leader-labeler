@@ -18,7 +18,7 @@ import (
 )
 
 // LabelPod sets the leadership label on a pod with retry logic.
-// Retries every cfg.RetryPeriod until success or cfg.RenewDeadline is exceeded.
+// Retries every cfg.RetryInterval until success or cfg.TimeoutDeadline is exceeded.
 func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, podName string, isLeader bool) error {
 	leaderValue := "false"
 	if isLeader {
@@ -34,11 +34,11 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 	}
 	patchBytes, _ := json.Marshal(patchData)
 
-	deadline := time.Now().Add(cfg.RenewDeadline)
+	deadline := time.Now().Add(cfg.TimeoutDeadline)
 	var lastErr error
 
 	for {
-		_, err := client.CoreV1().Pods(cfg.Namespace).Patch(ctx, podName,
+		_, err := client.CoreV1().Pods(cfg.PodNamespace).Patch(ctx, podName,
 			types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
 		if err == nil {
 			slog.Info("labeled pod",
@@ -56,13 +56,13 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 		slog.Warn("label update failed, retrying",
 			"error", err,
 			"pod_name", podName,
-			"retry_period", cfg.RetryPeriod)
+			"retry_period", cfg.RetryInterval)
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(cfg.RetryPeriod):
-			// continue to next attempt
+		case <-time.After(cfg.RetryInterval):
+			continue // make another attempt
 		}
 	}
 }
@@ -73,7 +73,7 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
 	// List all pods with the leadership label (any value)
 	labelSelector := cfg.LeadershipLabel
-	pods, err := client.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{
+	pods, err := client.CoreV1().Pods(cfg.PodNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {

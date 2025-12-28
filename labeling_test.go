@@ -101,10 +101,10 @@ func TestLabelPod(t *testing.T) {
 			})
 
 			cfg := &Config{
-				Namespace:       "default",
+				PodNamespace:    "default",
 				LeadershipLabel: "test/is-leader",
-				RetryPeriod:     tt.retryPeriod,
-				RenewDeadline:   tt.renewDeadline,
+				RetryInterval:   tt.retryPeriod,
+				TimeoutDeadline: tt.renewDeadline,
 			}
 
 			// Use a short timeout context for tests
@@ -267,10 +267,10 @@ func TestReconcileLabels(t *testing.T) {
 
 			cfg := &Config{
 				PodName:         tt.selfPodName,
-				Namespace:       "default",
+				PodNamespace:    "default",
 				LeadershipLabel: "test/is-leader",
-				RetryPeriod:     10 * time.Millisecond,
-				RenewDeadline:   100 * time.Millisecond,
+				RetryInterval:   10 * time.Millisecond,
+				TimeoutDeadline: 100 * time.Millisecond,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -398,10 +398,10 @@ func TestReconcileLabels_SkipsCorrectlyLabeledPods(t *testing.T) {
 
 			cfg := &Config{
 				PodName:         tt.selfPodName,
-				Namespace:       "default",
+				PodNamespace:    "default",
 				LeadershipLabel: "test/is-leader",
-				RetryPeriod:     10 * time.Millisecond,
-				RenewDeadline:   100 * time.Millisecond,
+				RetryInterval:   10 * time.Millisecond,
+				TimeoutDeadline: 100 * time.Millisecond,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)

@@ -22,11 +22,11 @@ const (
 type Config struct {
 	ElectionName    string
 	PodName         string
-	Namespace       string
+	PodNamespace    string
 	LeadershipLabel string
 	LeaseDuration   time.Duration
-	RenewDeadline   time.Duration
-	RetryPeriod     time.Duration
+	TimeoutDeadline time.Duration
+	RetryInterval   time.Duration
 }
 
 // SetupLogger configures structured JSON logging to stdout
@@ -47,11 +47,11 @@ func LoadConfig(args []string) (*Config, error) {
 	// Define flags
 	fs.StringVar(&cfg.ElectionName, "election-name", "", "Name of the election (required)")
 	fs.StringVar(&cfg.PodName, "pod-name", os.Getenv("POD_NAME"), "Name of this pod")
-	fs.StringVar(&cfg.Namespace, "pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace of this pod")
+	fs.StringVar(&cfg.PodNamespace, "pod-namespace", os.Getenv("POD_NAMESPACE"), "PodNamespace of this pod")
 	fs.StringVar(&cfg.LeadershipLabel, "leadership-label", "", "Label for leader status (default: <election-name>/is-leader)")
 	fs.DurationVar(&cfg.LeaseDuration, "lease-duration", DefaultLeaseDuration, "Lease duration")
-	fs.DurationVar(&cfg.RenewDeadline, "renew-deadline", DefaultRenewDeadline, "Renew deadline")
-	fs.DurationVar(&cfg.RetryPeriod, "retry-period", DefaultRetryPeriod, "Retry period")
+	fs.DurationVar(&cfg.TimeoutDeadline, "renew-deadline", DefaultRenewDeadline, "Renew deadline")
+	fs.DurationVar(&cfg.RetryInterval, "retry-period", DefaultRetryPeriod, "Retry period")
 
 	// Parse arguments
 	if err := fs.Parse(args); err != nil {
@@ -70,7 +70,7 @@ func LoadConfig(args []string) (*Config, error) {
 		slog.Error("configuration error", "error", err)
 		return nil, err
 	}
-	if cfg.Namespace == "" {
+	if cfg.PodNamespace == "" {
 		err := fmt.Errorf("--pod-namespace is required (or set POD_NAMESPACE env var)")
 		slog.Error("configuration error", "error", err)
 		return nil, err

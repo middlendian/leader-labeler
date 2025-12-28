@@ -107,7 +107,7 @@ func TestValidatePermissions(t *testing.T) {
 
 			cfg := &Config{
 				ElectionName: "test-election",
-				Namespace:    "default",
+				PodNamespace: "default",
 			}
 
 			err := validatePermissions(context.Background(), client, cfg)
@@ -133,7 +133,7 @@ func TestValidatePermissions(t *testing.T) {
 func TestCheckPermission(t *testing.T) {
 	tests := []struct {
 		name       string
-		check      PermissionCheck
+		check      permissionCheck
 		allowed    bool
 		reactorErr error
 		wantOK     bool
@@ -141,21 +141,21 @@ func TestCheckPermission(t *testing.T) {
 	}{
 		{
 			name:    "permission allowed",
-			check:   PermissionCheck{Resource: "pods", Verb: "get"},
+			check:   permissionCheck{Resource: "pods", Verb: "get"},
 			allowed: true,
 			wantOK:  true,
 			wantErr: false,
 		},
 		{
 			name:    "permission denied",
-			check:   PermissionCheck{Resource: "pods", Verb: "delete"},
+			check:   permissionCheck{Resource: "pods", Verb: "delete"},
 			allowed: false,
 			wantOK:  false,
 			wantErr: false,
 		},
 		{
 			name:       "API error",
-			check:      PermissionCheck{Resource: "pods", Verb: "get"},
+			check:      permissionCheck{Resource: "pods", Verb: "get"},
 			reactorErr: errors.New("connection refused"),
 			wantOK:     false,
 			wantErr:    true,
@@ -177,7 +177,7 @@ func TestCheckPermission(t *testing.T) {
 				return true, review, nil
 			})
 
-			cfg := &Config{Namespace: "default"}
+			cfg := &Config{PodNamespace: "default"}
 
 			ok, err := checkPermission(context.Background(), client, cfg, tt.check)
 
@@ -203,12 +203,12 @@ func TestCheckPermission(t *testing.T) {
 func TestFormatPermissionError(t *testing.T) {
 	tests := []struct {
 		name     string
-		missing  []PermissionCheck
+		missing  []permissionCheck
 		contains []string
 	}{
 		{
 			name: "missing pod permissions",
-			missing: []PermissionCheck{
+			missing: []permissionCheck{
 				{Resource: "pods", Verb: "get"},
 				{Resource: "pods", Verb: "patch"},
 			},
@@ -222,7 +222,7 @@ func TestFormatPermissionError(t *testing.T) {
 		},
 		{
 			name: "missing lease permissions",
-			missing: []PermissionCheck{
+			missing: []permissionCheck{
 				{Resource: "leases", Verb: "create"},
 				{Resource: "leases", Verb: "update"},
 			},
@@ -236,21 +236,21 @@ func TestFormatPermissionError(t *testing.T) {
 		},
 		{
 			name: "mixed permissions",
-			missing: []PermissionCheck{
+			missing: []permissionCheck{
 				{Resource: "pods", Verb: "list"},
 				{Resource: "leases", Verb: "get"},
 			},
 			contains: []string{
 				"pods (core API)",
 				"leases (coordination.k8s.io)",
-				"Namespace: test-ns",
+				"PodNamespace: test-ns",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{Namespace: "test-ns"}
+			cfg := &Config{PodNamespace: "test-ns"}
 			err := formatPermissionError(tt.missing, cfg)
 
 			errStr := err.Error()
@@ -296,11 +296,11 @@ func TestCheckPermission_PassesResourceName(t *testing.T) {
 	})
 
 	cfg := &Config{
-		Namespace:    "default",
+		PodNamespace: "default",
 		ElectionName: "my-election",
 	}
 
-	check := PermissionCheck{
+	check := permissionCheck{
 		Resource:     "leases",
 		APIGroup:     "coordination.k8s.io",
 		Verb:         "get",
@@ -330,10 +330,10 @@ func TestCheckPermission_PassesCorrectNamespace(t *testing.T) {
 	})
 
 	cfg := &Config{
-		Namespace: "my-custom-namespace",
+		PodNamespace: "my-custom-namespace",
 	}
 
-	check := PermissionCheck{
+	check := permissionCheck{
 		Resource: "pods",
 		Verb:     "get",
 	}
@@ -344,19 +344,19 @@ func TestCheckPermission_PassesCorrectNamespace(t *testing.T) {
 	}
 
 	if capturedNamespace != "my-custom-namespace" {
-		t.Errorf("ResourceAttributes.Namespace = %q, want %q", capturedNamespace, "my-custom-namespace")
+		t.Errorf("ResourceAttributes.PodNamespace = %q, want %q", capturedNamespace, "my-custom-namespace")
 	}
 }
 
 func TestCheckPermission_PassesAPIGroup(t *testing.T) {
 	tests := []struct {
 		name      string
-		check     PermissionCheck
+		check     permissionCheck
 		wantGroup string
 	}{
 		{
 			name: "core API group (empty)",
-			check: PermissionCheck{
+			check: permissionCheck{
 				Resource: "pods",
 				APIGroup: "",
 				Verb:     "get",
@@ -365,7 +365,7 @@ func TestCheckPermission_PassesAPIGroup(t *testing.T) {
 		},
 		{
 			name: "coordination API group",
-			check: PermissionCheck{
+			check: permissionCheck{
 				Resource: "leases",
 				APIGroup: "coordination.k8s.io",
 				Verb:     "get",
@@ -387,7 +387,7 @@ func TestCheckPermission_PassesAPIGroup(t *testing.T) {
 				return true, review, nil
 			})
 
-			cfg := &Config{Namespace: "default"}
+			cfg := &Config{PodNamespace: "default"}
 
 			_, err := checkPermission(context.Background(), client, cfg, tt.check)
 			if err != nil {
@@ -431,7 +431,7 @@ func TestValidatePermissions_ChecksAllRequiredPermissions(t *testing.T) {
 
 	cfg := &Config{
 		ElectionName: "test-election",
-		Namespace:    "default",
+		PodNamespace: "default",
 	}
 
 	err := validatePermissions(context.Background(), client, cfg)
@@ -482,7 +482,7 @@ func TestValidatePermissions_ContextCancellation(t *testing.T) {
 
 	cfg := &Config{
 		ElectionName: "test-election",
-		Namespace:    "default",
+		PodNamespace: "default",
 	}
 
 	err := validatePermissions(ctx, client, cfg)
@@ -502,7 +502,7 @@ func TestValidatePermissions_StopsOnFirstAPIError(t *testing.T) {
 
 	cfg := &Config{
 		ElectionName: "test-election",
-		Namespace:    "default",
+		PodNamespace: "default",
 	}
 
 	err := validatePermissions(context.Background(), client, cfg)

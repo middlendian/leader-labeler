@@ -46,8 +46,8 @@ func TestLoadConfig(t *testing.T) {
 				if cfg.PodName != "test-pod" {
 					t.Errorf("PodName = %q, want %q", cfg.PodName, "test-pod")
 				}
-				if cfg.Namespace != "default" {
-					t.Errorf("Namespace = %q, want %q", cfg.Namespace, "default")
+				if cfg.PodNamespace != "default" {
+					t.Errorf("PodNamespace = %q, want %q", cfg.PodNamespace, "default")
 				}
 			},
 		},
@@ -77,11 +77,11 @@ func TestLoadConfig(t *testing.T) {
 				if cfg.LeaseDuration != 15*time.Second {
 					t.Errorf("LeaseDuration = %v, want %v", cfg.LeaseDuration, 15*time.Second)
 				}
-				if cfg.RenewDeadline != 10*time.Second {
-					t.Errorf("RenewDeadline = %v, want %v", cfg.RenewDeadline, 10*time.Second)
+				if cfg.TimeoutDeadline != 10*time.Second {
+					t.Errorf("TimeoutDeadline = %v, want %v", cfg.TimeoutDeadline, 10*time.Second)
 				}
-				if cfg.RetryPeriod != 2*time.Second {
-					t.Errorf("RetryPeriod = %v, want %v", cfg.RetryPeriod, 2*time.Second)
+				if cfg.RetryInterval != 2*time.Second {
+					t.Errorf("RetryInterval = %v, want %v", cfg.RetryInterval, 2*time.Second)
 				}
 			},
 		},
@@ -99,11 +99,11 @@ func TestLoadConfig(t *testing.T) {
 				if cfg.LeaseDuration != 30*time.Second {
 					t.Errorf("LeaseDuration = %v, want %v", cfg.LeaseDuration, 30*time.Second)
 				}
-				if cfg.RenewDeadline != 20*time.Second {
-					t.Errorf("RenewDeadline = %v, want %v", cfg.RenewDeadline, 20*time.Second)
+				if cfg.TimeoutDeadline != 20*time.Second {
+					t.Errorf("TimeoutDeadline = %v, want %v", cfg.TimeoutDeadline, 20*time.Second)
 				}
-				if cfg.RetryPeriod != 5*time.Second {
-					t.Errorf("RetryPeriod = %v, want %v", cfg.RetryPeriod, 5*time.Second)
+				if cfg.RetryInterval != 5*time.Second {
+					t.Errorf("RetryInterval = %v, want %v", cfg.RetryInterval, 5*time.Second)
 				}
 			},
 		},
@@ -122,8 +122,8 @@ func TestLoadConfig(t *testing.T) {
 			args:    []string{"--election-name=my-election", "--pod-name=test-pod"},
 			envVars: map[string]string{"POD_NAMESPACE": "env-namespace"},
 			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Namespace != "env-namespace" {
-					t.Errorf("Namespace = %q, want %q", cfg.Namespace, "env-namespace")
+				if cfg.PodNamespace != "env-namespace" {
+					t.Errorf("PodNamespace = %q, want %q", cfg.PodNamespace, "env-namespace")
 				}
 			},
 		},
@@ -138,8 +138,8 @@ func TestLoadConfig(t *testing.T) {
 				if cfg.PodName != "flag-pod" {
 					t.Errorf("PodName = %q, want %q (flag should override env)", cfg.PodName, "flag-pod")
 				}
-				if cfg.Namespace != "flag-ns" {
-					t.Errorf("Namespace = %q, want %q (flag should override env)", cfg.Namespace, "flag-ns")
+				if cfg.PodNamespace != "flag-ns" {
+					t.Errorf("PodNamespace = %q, want %q (flag should override env)", cfg.PodNamespace, "flag-ns")
 				}
 			},
 		},
