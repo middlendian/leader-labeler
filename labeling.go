@@ -100,15 +100,13 @@ func ReconcileLabels(ctx context.Context, client kubernetes.Interface, cfg *Conf
 		}
 
 		// Update label in parallel
-		wg.Add(1)
-		go func(podName string) {
-			defer wg.Done()
-			if err := LabelPod(ctx, client, cfg, podName, false); err != nil {
+		wg.Go(func() {
+			if err := LabelPod(ctx, client, cfg, pod.Name, false); err != nil {
 				slog.Error("failed to label pod during reconciliation",
 					"error", err,
-					"pod_name", podName)
+					"pod_name", pod.Name)
 			}
-		}(pod.Name)
+		})
 	}
 	wg.Wait()
 
