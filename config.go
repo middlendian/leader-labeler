@@ -50,8 +50,8 @@ func LoadConfig(args []string) (*Config, error) {
 	fs.StringVar(&cfg.PodNamespace, "pod-namespace", os.Getenv("POD_NAMESPACE"), "PodNamespace of this pod")
 	fs.StringVar(&cfg.LeadershipLabel, "leadership-label", "", "Label for leader status (default: <election-name>/is-leader)")
 	fs.DurationVar(&cfg.LeaseDuration, "lease-duration", DefaultLeaseDuration, "Lease duration")
-	fs.DurationVar(&cfg.TimeoutDeadline, "renew-deadline", DefaultRenewDeadline, "Renew deadline")
-	fs.DurationVar(&cfg.RetryInterval, "retry-period", DefaultRetryPeriod, "Retry period")
+	fs.DurationVar(&cfg.TimeoutDeadline, "timeout-deadline", DefaultRenewDeadline, "Timeout deadline")
+	fs.DurationVar(&cfg.RetryInterval, "retry-interval", DefaultRetryPeriod, "Retry interval")
 
 	// Parse arguments
 	if err := fs.Parse(args); err != nil {

@@ -243,7 +243,7 @@ func TestFormatPermissionError(t *testing.T) {
 			contains: []string{
 				"pods (core API)",
 				"leases (coordination.k8s.io)",
-				"PodNamespace: test-ns",
+				"Namespace: test-ns",
 			},
 		},
 	}

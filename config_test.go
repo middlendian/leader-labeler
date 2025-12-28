@@ -92,8 +92,8 @@ func TestLoadConfig(t *testing.T) {
 				"--pod-name=test-pod",
 				"--pod-namespace=default",
 				"--lease-duration=30s",
-				"--renew-deadline=20s",
-				"--retry-period=5s",
+				"--timeout-deadline=20s",
+				"--retry-interval=5s",
 			},
 			validate: func(t *testing.T, cfg *Config) {
 				if cfg.LeaseDuration != 30*time.Second {
