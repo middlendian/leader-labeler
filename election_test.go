@@ -134,8 +134,9 @@ func TestWaitForReadyPod(t *testing.T) {
 			client := fake.NewClientset(pod)
 
 			cfg := &Config{
-				PodName:   "test-pod",
-				Namespace: "default",
+				PodName:     "test-pod",
+				Namespace:   "default",
+				RetryPeriod: 10 * time.Millisecond,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -178,8 +179,9 @@ func TestWaitForReadyPod_BecomesReadyAfterPolling(t *testing.T) {
 	client := fake.NewClientset(pod)
 
 	cfg := &Config{
-		PodName:   "test-pod",
-		Namespace: "default",
+		PodName:     "test-pod",
+		Namespace:   "default",
+		RetryPeriod: 10 * time.Millisecond,
 	}
 
 	// Make the pod ready after a short delay

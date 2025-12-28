@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,46 +19,58 @@ import (
 
 func TestLabelPod(t *testing.T) {
 	tests := []struct {
-		name      string
-		podName   string
-		isLeader  bool
-		failCount int // number of times to fail before succeeding
-		wantErr   bool
+		name          string
+		podName       string
+		isLeader      bool
+		failCount     int           // number of times to fail before succeeding
+		retryPeriod   time.Duration // retry interval
+		renewDeadline time.Duration // total deadline for retries
+		wantErr       bool
 	}{
 		{
-			name:      "successful label as leader",
-			podName:   "test-pod",
-			isLeader:  true,
-			failCount: 0,
-			wantErr:   false,
+			name:          "successful label as leader",
+			podName:       "test-pod",
+			isLeader:      true,
+			failCount:     0,
+			retryPeriod:   10 * time.Millisecond,
+			renewDeadline: 100 * time.Millisecond,
+			wantErr:       false,
 		},
 		{
-			name:      "successful label as non-leader",
-			podName:   "test-pod",
-			isLeader:  false,
-			failCount: 0,
-			wantErr:   false,
+			name:          "successful label as non-leader",
+			podName:       "test-pod",
+			isLeader:      false,
+			failCount:     0,
+			retryPeriod:   10 * time.Millisecond,
+			renewDeadline: 100 * time.Millisecond,
+			wantErr:       false,
 		},
 		{
-			name:      "retry succeeds on second attempt",
-			podName:   "test-pod",
-			isLeader:  true,
-			failCount: 1,
-			wantErr:   false,
+			name:          "retry succeeds on second attempt",
+			podName:       "test-pod",
+			isLeader:      true,
+			failCount:     1,
+			retryPeriod:   10 * time.Millisecond,
+			renewDeadline: 100 * time.Millisecond,
+			wantErr:       false,
 		},
 		{
-			name:      "retry succeeds on third attempt",
-			podName:   "test-pod",
-			isLeader:  true,
-			failCount: 2,
-			wantErr:   false,
+			name:          "retry succeeds on third attempt",
+			podName:       "test-pod",
+			isLeader:      true,
+			failCount:     2,
+			retryPeriod:   10 * time.Millisecond,
+			renewDeadline: 100 * time.Millisecond,
+			wantErr:       false,
 		},
 		{
-			name:      "fails after all retries",
-			podName:   "test-pod",
-			isLeader:  true,
-			failCount: 10, // more than max retries
-			wantErr:   true,
+			name:          "fails after deadline exceeded",
+			podName:       "test-pod",
+			isLeader:      true,
+			failCount:     1000,                  // always fail
+			retryPeriod:   10 * time.Millisecond, // short retry period
+			renewDeadline: 25 * time.Millisecond, // deadline will be exceeded after ~2 retries
+			wantErr:       true,
 		},
 	}
 
@@ -90,6 +103,8 @@ func TestLabelPod(t *testing.T) {
 			cfg := &Config{
 				Namespace:       "default",
 				LeadershipLabel: "test/is-leader",
+				RetryPeriod:     tt.retryPeriod,
+				RenewDeadline:   tt.renewDeadline,
 			}
 
 			// Use a short timeout context for tests
@@ -254,6 +269,8 @@ func TestReconcileLabels(t *testing.T) {
 				PodName:         tt.selfPodName,
 				Namespace:       "default",
 				LeadershipLabel: "test/is-leader",
+				RetryPeriod:     10 * time.Millisecond,
+				RenewDeadline:   100 * time.Millisecond,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -383,6 +400,8 @@ func TestReconcileLabels_SkipsCorrectlyLabeledPods(t *testing.T) {
 				PodName:         tt.selfPodName,
 				Namespace:       "default",
 				LeadershipLabel: "test/is-leader",
+				RetryPeriod:     10 * time.Millisecond,
+				RenewDeadline:   100 * time.Millisecond,
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)

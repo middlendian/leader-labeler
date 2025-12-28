@@ -15,10 +15,8 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-// Election constants
 const (
-	PodReadinessPollInterval = 2 * time.Second
-	ElectionRetryBackoff     = 100 * time.Millisecond
+	ElectionRetryBackoff = 100 * time.Millisecond
 )
 
 // RunElection waits for pod readiness, initializes the leadership label, and runs the leader election loop.
@@ -118,7 +116,7 @@ func waitForReadyPod(ctx context.Context, client kubernetes.Interface, cfg *Conf
 		return nil
 	}
 
-	ticker := time.NewTicker(PodReadinessPollInterval)
+	ticker := time.NewTicker(cfg.RetryPeriod)
 	defer ticker.Stop()
 
 	for {
