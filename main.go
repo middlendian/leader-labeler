@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -230,11 +231,19 @@ func runLeaderElection(ctx context.Context) {
 					slog.Info("became leader", "pod_name", cfg.PodName)
 
 					// Reconcile all participants (sets is-leader=true on self, false on others)
-					reconcileLabels(ctx)
+					if err := reconcileLabels(ctx); err != nil {
+						slog.Error("failed to reconcile labels, releasing leadership", "error", err)
+						electionCancel()
+						return
+					}
 				},
 				OnStoppedLeading: func() {
 					isLeader.Store(false)
 					slog.Warn("lost leadership", "pod_name", cfg.PodName)
+					// Immediately mark self as non-leader
+					if err := labelPod(electionCtx, cfg.PodName, false); err != nil {
+						slog.Error("failed to remove leader label", "error", err, "label", cfg.LeadershipLabel)
+					}
 				},
 				OnNewLeader: func(identity string) {
 					if identity != cfg.PodName {
@@ -253,31 +262,53 @@ func runLeaderElection(ctx context.Context) {
 	}
 }
 
-// reconcileLabels sets is-leader=false on all other participants.
-// Called once when this pod becomes leader.
-func reconcileLabels(ctx context.Context) {
+// reconcileLabels sets is-leader=true on self, is-leader=false on all other participants.
+// Called once when this pod becomes leader. Returns an error if labeling self fails.
+func reconcileLabels(ctx context.Context) error {
 	// List all pods with the leadership label (any value)
 	labelSelector := cfg.LeadershipLabel
 	pods, err := client.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
-		slog.Error("failed to list participant pods", "error", err)
-		return
+		return fmt.Errorf("failed to list participant pods: %w", err)
 	}
 
+	// First, label self as leader (critical - must succeed)
+	if err := labelPod(ctx, cfg.PodName, true); err != nil {
+		return fmt.Errorf("failed to label self as leader: %w", err)
+	}
+
+	// Then, label others in parallel (best effort - just log errors)
+	var wg sync.WaitGroup
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		isLeaderPod := pod.Name == cfg.PodName
-		if err := labelPod(ctx, pod.Name, isLeaderPod); err != nil {
-			slog.Error("failed to label pod during reconciliation",
-				"error", err,
-				"pod_name", pod.Name,
-				"is_leader", isLeaderPod)
+		if pod.Name == cfg.PodName {
+			continue // Already labeled self above
 		}
+
+		// Skip if label already has the correct value
+		currentValue := pod.Labels[cfg.LeadershipLabel]
+		if currentValue == "false" {
+			slog.Debug("skipping pod, label already correct",
+				"pod_name", pod.Name,
+				cfg.LeadershipLabel, currentValue)
+			continue
+		}
+
+		// Update label in parallel
+		wg.Go(func() {
+			if err := labelPod(ctx, pod.Name, false); err != nil {
+				slog.Error("failed to label pod during reconciliation",
+					"error", err,
+					"pod_name", pod.Name)
+			}
+		})
 	}
+	wg.Wait()
 
 	slog.Debug("reconciliation complete", "participant_count", len(pods.Items))
+	return nil
 }
 
 func labelPod(ctx context.Context, podName string, isLeaderPod bool) error {
