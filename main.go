@@ -111,9 +111,9 @@ func parseConfig(args []string) (*Config, error) {
 	// Define flags
 	fs.StringVar(&c.ElectionName, "election-name", "", "Name of the election (required)")
 	fs.StringVar(&c.PodName, "pod-name", os.Getenv("POD_NAME"), "Name of this pod")
-	fs.StringVar(&c.Namespace, "namespace", os.Getenv("POD_NAMESPACE"), "Namespace of this pod")
+	fs.StringVar(&c.Namespace, "pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace of this pod")
 	fs.StringVar(&c.LeadershipLabel, "leadership-label", "", "Label for leader status (default: <election-name>/is-leader)")
-	fs.StringVar(&c.ParticipationLabel, "participation-label", "", "Label for participants (default: <election-name>/participant)")
+	fs.StringVar(&c.ParticipationLabel, "participation-label", "", "Label for participants (default: <election-name>/is-participant)")
 	fs.DurationVar(&c.LeaseDuration, "lease-duration", 15*time.Second, "Lease duration")
 	fs.DurationVar(&c.RenewDeadline, "renew-deadline", 10*time.Second, "Renew deadline")
 	fs.DurationVar(&c.RetryPeriod, "retry-period", 2*time.Second, "Retry period")
@@ -131,7 +131,7 @@ func parseConfig(args []string) (*Config, error) {
 		return nil, fmt.Errorf("--pod-name is required (or set POD_NAME env var)")
 	}
 	if c.Namespace == "" {
-		return nil, fmt.Errorf("--namespace is required (or set POD_NAMESPACE env var)")
+		return nil, fmt.Errorf("--pod-namespace is required (or set POD_NAMESPACE env var)")
 	}
 
 	// Set default labels if not provided
@@ -159,7 +159,7 @@ func determineLabelNames(electionName, leadershipLabel, participationLabel strin
 		leadershipLabel = electionName + "/is-leader"
 	}
 	if participationLabel == "" {
-		participationLabel = electionName + "/participant"
+		participationLabel = electionName + "/is-participant"
 	}
 	return leadershipLabel, participationLabel
 }

@@ -96,7 +96,7 @@ func TestParseConfig(t *testing.T) {
 			args: []string{
 				"--election-name=my-app",
 				"--pod-name=my-pod",
-				"--namespace=default",
+				"--pod-namespace=default",
 			},
 			expectError: false,
 			validate: func(t *testing.T, c *Config) {
@@ -113,8 +113,8 @@ func TestParseConfig(t *testing.T) {
 				if c.LeadershipLabel != "my-app/is-leader" {
 					t.Errorf("LeadershipLabel = %v, expected my-app/is-leader", c.LeadershipLabel)
 				}
-				if c.ParticipationLabel != "my-app/participant" {
-					t.Errorf("ParticipationLabel = %v, expected my-app/participant", c.ParticipationLabel)
+				if c.ParticipationLabel != "my-app/is-participant" {
+					t.Errorf("ParticipationLabel = %v, expected my-app/is-participant", c.ParticipationLabel)
 				}
 				// Check default durations
 				if c.LeaseDuration != 15*time.Second {
@@ -127,7 +127,7 @@ func TestParseConfig(t *testing.T) {
 			args: []string{
 				"--election-name=my-app",
 				"--pod-name=my-pod",
-				"--namespace=default",
+				"--pod-namespace=default",
 				"--leadership-label=custom/leader",
 				"--participation-label=custom/member",
 			},
@@ -146,7 +146,7 @@ func TestParseConfig(t *testing.T) {
 			args: []string{
 				"--election-name=my-app",
 				"--pod-name=my-pod",
-				"--namespace=default",
+				"--pod-namespace=default",
 				"--lease-duration=30s",
 				"--renew-deadline=20s",
 				"--retry-period=5s",
@@ -166,13 +166,13 @@ func TestParseConfig(t *testing.T) {
 		},
 		{
 			name:        "missing election-name",
-			args:        []string{"--pod-name=my-pod", "--namespace=default"},
+			args:        []string{"--pod-name=my-pod", "--pod-namespace=default"},
 			expectError: true,
 			errorMsg:    "--election-name is required",
 		},
 		{
 			name:        "missing pod-name",
-			args:        []string{"--election-name=my-app", "--namespace=default"},
+			args:        []string{"--election-name=my-app", "--pod-namespace=default"},
 			expectError: true,
 			errorMsg:    "--pod-name is required (or set POD_NAME env var)",
 		},
@@ -180,7 +180,7 @@ func TestParseConfig(t *testing.T) {
 			name:        "missing namespace",
 			args:        []string{"--election-name=my-app", "--pod-name=my-pod"},
 			expectError: true,
-			errorMsg:    "--namespace is required (or set POD_NAMESPACE env var)",
+			errorMsg:    "--pod-namespace is required (or set POD_NAMESPACE env var)",
 		},
 		{
 			name:        "invalid flag",
@@ -234,7 +234,7 @@ func TestApplyDefaultLabels(t *testing.T) {
 			inputLeadershipLabel:       "",
 			inputParticipationLabel:    "",
 			expectedLeadershipLabel:    "my-app/is-leader",
-			expectedParticipationLabel: "my-app/participant",
+			expectedParticipationLabel: "my-app/is-participant",
 		},
 		{
 			name:                       "preserves custom leadership label",
@@ -242,7 +242,7 @@ func TestApplyDefaultLabels(t *testing.T) {
 			inputLeadershipLabel:       "custom/leader",
 			inputParticipationLabel:    "",
 			expectedLeadershipLabel:    "custom/leader",
-			expectedParticipationLabel: "my-app/participant",
+			expectedParticipationLabel: "my-app/is-participant",
 		},
 		{
 			name:                       "preserves custom participation label",
@@ -266,7 +266,7 @@ func TestApplyDefaultLabels(t *testing.T) {
 			inputLeadershipLabel:       "",
 			inputParticipationLabel:    "",
 			expectedLeadershipLabel:    "prod-service/is-leader",
-			expectedParticipationLabel: "prod-service/participant",
+			expectedParticipationLabel: "prod-service/is-participant",
 		},
 	}
 

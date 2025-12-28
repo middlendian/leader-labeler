@@ -58,7 +58,7 @@ spec:
         - --election-name=my-app
         # Optional: customize labels
         # - --leadership-label=my-app/is-leader
-        # - --participation-label=my-app/participant
+        # - --participation-label=my-app/is-participant
         # Optional: tune timeouts
         # - --lease-duration=15s
         # - --renew-deadline=10s

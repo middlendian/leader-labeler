@@ -111,9 +111,9 @@ make docker-push
 |-----------|----------|---------|-------------|
 | `--election-name` | Yes | - | Unique name for this election group. Used as the lease name and label prefix. |
 | `--pod-name` | No | `$POD_NAME` | Name of the current pod. Usually set via downward API. |
-| `--namespace` | No | `$POD_NAMESPACE` | Namespace of the pod and lease. Usually set via downward API. |
+| `--pod-namespace` | No | `$POD_NAMESPACE` | Namespace of the pod and lease. Usually set via downward API. |
 | `--leadership-label` | No | `<election-name>/is-leader` | Label key for leader status (`true` or `false`). |
-| `--participation-label` | No | `<election-name>/participant` | Label key for active participants (`true` when participating). |
+| `--participation-label` | No | `<election-name>/is-participant` | Label key for active participants (`true` when participating). |
 | `--lease-duration` | No | `15s` | How long non-leaders wait before attempting to acquire leadership. |
 | `--renew-deadline` | No | `10s` | How long the leader has to renew leadership before giving up. |
 | `--retry-period` | No | `2s` | How often to retry leadership actions. |
@@ -213,7 +213,7 @@ spec:
 
 1. Each pod runs the leader-labeler sidecar
 2. Sidecars wait for the main container to become Ready
-3. Ready pods apply the participation label (`<election-name>/participant=true`)
+3. Ready pods apply the participation label (`<election-name>/is-participant=true`)
 4. Pods participate in leader election using Kubernetes Lease objects
 5. The leader continuously reconciles labels every 5 seconds:
    - Sets `<election-name>/is-leader=true` on itself
