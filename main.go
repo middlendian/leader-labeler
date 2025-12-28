@@ -1,3 +1,6 @@
+// Copyright 2025 middlendian
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package main
 
 import (
