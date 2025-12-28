@@ -60,8 +60,8 @@ spec:
         # - --leadership-label=my-app/is-leader
         # Optional: tune timeouts
         # - --lease-duration=15s
-        # - --renew-deadline=10s
-        # - --retry-period=2s
+        # - --timeout-deadline=10s
+        # - --retry-interval=2s
         env:
         - name: POD_NAME
           valueFrom:

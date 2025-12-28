@@ -114,8 +114,8 @@ make docker-push
 | `--pod-namespace` | No | `$POD_NAMESPACE` | Namespace of the pod and lease. Usually set via downward API. |
 | `--leadership-label` | No | `<election-name>/is-leader` | Label key for leader status (`true` or `false`). |
 | `--lease-duration` | No | `15s` | How long non-leaders wait before attempting to acquire leadership. |
-| `--renew-deadline` | No | `10s` | How long the leader has to renew leadership before giving up. |
-| `--retry-period` | No | `2s` | How often to retry leadership actions. |
+| `--timeout-deadline` | No | `10s` | How long the leader has to renew leadership before giving up. |
+| `--retry-interval` | No | `2s` | How often to retry leadership actions. |
 
 ### Environment Variables
 
@@ -199,8 +199,8 @@ spec:
   args:
   - --election-name=my-app
   - --lease-duration=10s
-  - --renew-deadline=5s
-  - --retry-period=1s
+  - --timeout-deadline=5s
+  - --retry-interval=1s
 ```
 
 **Note**: Shorter timeouts increase API server load. Use defaults unless you need faster failover.
@@ -228,7 +228,7 @@ spec:
 
 With `maxSurge: 100%` rolling updates, new pods are Ready and participating in the election **before** SIGTERM is sent to old pods. This ensures:
 - A successor is always available to take over leadership
-- Leadership transfer happens within the `retry-period` (default 2s)
+- Leadership transfer happens within the `retry-interval` (default 2s)
 - No draining timeout logic is needed
 
 ### Traffic Continuity
@@ -256,7 +256,7 @@ strategy:
 1. Kubernetes creates new pods (all replicas) before terminating old ones
 2. New pods become Ready and join the election
 3. Kubernetes sends SIGTERM to old pods
-4. Old leader releases lease, new follower acquires within `retry-period` (2s)
+4. Old leader releases lease, new follower acquires within `retry-interval` (2s)
 5. Leadership transfers smoothly, old pods exit
 
 This approach temporarily doubles the number of pods during updates, but ensures successors are always available before any termination begins.
