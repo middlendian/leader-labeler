@@ -11,11 +11,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -34,6 +36,14 @@ type Config struct {
 	LeaseDuration   time.Duration
 	RenewDeadline   time.Duration
 	RetryPeriod     time.Duration
+}
+
+// PermissionCheck describes a single RBAC permission to validate
+type PermissionCheck struct {
+	Resource     string
+	APIGroup     string
+	Verb         string
+	ResourceName string // optional: specific resource name (e.g., lease name)
 }
 
 var (
@@ -65,6 +75,12 @@ func main() {
 	// Setup context for application lifecycle
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Validate RBAC permissions before proceeding
+	if err := validatePermissions(ctx); err != nil {
+		slog.Error("RBAC permission validation failed", "error", err)
+		os.Exit(1)
+	}
 
 	// Get this pod object
 	pod, err := client.CoreV1().Pods(cfg.Namespace).Get(ctx, cfg.PodName, metav1.GetOptions{})
@@ -167,6 +183,132 @@ func buildKubernetesClient() (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("failed to create clientset: %w", err)
 	}
 	return clientset, nil
+}
+
+// validatePermissions checks that the service account has all required RBAC permissions.
+// It uses SelfSubjectAccessReview to verify each permission before the application starts.
+// Returns an error with detailed remediation instructions if any permission is missing.
+func validatePermissions(ctx context.Context) error {
+	slog.Info("validating RBAC permissions")
+
+	// Define all required permissions
+	checks := []PermissionCheck{
+		// Pod permissions (core API group)
+		{Resource: "pods", APIGroup: "", Verb: "get"},
+		{Resource: "pods", APIGroup: "", Verb: "list"},
+		{Resource: "pods", APIGroup: "", Verb: "patch"},
+		// Lease permissions (coordination.k8s.io API group)
+		{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "get", ResourceName: cfg.ElectionName},
+		{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "create", ResourceName: cfg.ElectionName},
+		{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "update", ResourceName: cfg.ElectionName},
+	}
+
+	var missingPermissions []PermissionCheck
+
+	for _, check := range checks {
+		allowed, err := checkPermission(ctx, check)
+		if err != nil {
+			return fmt.Errorf("failed to check permission (resource=%s, verb=%s): %w; "+
+				"this may indicate the cluster does not support SelfSubjectAccessReview or "+
+				"the service account lacks permission to perform access reviews",
+				check.Resource, check.Verb, err)
+		}
+		if !allowed {
+			missingPermissions = append(missingPermissions, check)
+		}
+	}
+
+	if len(missingPermissions) > 0 {
+		return formatPermissionError(missingPermissions)
+	}
+
+	slog.Info("all required RBAC permissions validated successfully")
+	return nil
+}
+
+// checkPermission performs a SelfSubjectAccessReview for a single permission.
+// Returns (true, nil) if allowed, (false, nil) if denied, or (false, error) on failure.
+func checkPermission(ctx context.Context, check PermissionCheck) (bool, error) {
+	review := &authorizationv1.SelfSubjectAccessReview{
+		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Namespace: cfg.Namespace,
+				Verb:      check.Verb,
+				Group:     check.APIGroup,
+				Resource:  check.Resource,
+				Name:      check.ResourceName,
+			},
+		},
+	}
+
+	result, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(
+		ctx, review, metav1.CreateOptions{})
+	if err != nil {
+		return false, err
+	}
+
+	if !result.Status.Allowed {
+		slog.Debug("permission check denied",
+			"resource", check.Resource,
+			"apiGroup", check.APIGroup,
+			"verb", check.Verb,
+			"name", check.ResourceName,
+			"reason", result.Status.Reason,
+			"evaluationError", result.Status.EvaluationError)
+	}
+
+	return result.Status.Allowed, nil
+}
+
+// formatPermissionError creates a detailed error message with remediation instructions.
+func formatPermissionError(missing []PermissionCheck) error {
+	var sb strings.Builder
+
+	sb.WriteString("missing required RBAC permissions:\n\n")
+
+	// Group by resource type for cleaner output
+	var podVerbs, leaseVerbs []string
+	for _, p := range missing {
+		if p.Resource == "pods" {
+			podVerbs = append(podVerbs, p.Verb)
+		} else if p.Resource == "leases" {
+			leaseVerbs = append(leaseVerbs, p.Verb)
+		}
+	}
+
+	if len(podVerbs) > 0 {
+		sb.WriteString(fmt.Sprintf("  - pods (core API): %s\n", strings.Join(podVerbs, ", ")))
+	}
+	if len(leaseVerbs) > 0 {
+		sb.WriteString(fmt.Sprintf("  - leases (coordination.k8s.io): %s\n", strings.Join(leaseVerbs, ", ")))
+	}
+
+	sb.WriteString(fmt.Sprintf("\nNamespace: %s\n", cfg.Namespace))
+	sb.WriteString("\nTo fix this, ensure the ServiceAccount has a Role and RoleBinding with the required permissions.\n")
+	sb.WriteString("Example Role rules:\n\n")
+
+	if len(podVerbs) > 0 {
+		sb.WriteString("  - apiGroups: [\"\"]\n")
+		sb.WriteString("    resources: [\"pods\"]\n")
+		sb.WriteString(fmt.Sprintf("    verbs: [%s]\n\n", formatVerbList(podVerbs)))
+	}
+
+	if len(leaseVerbs) > 0 {
+		sb.WriteString("  - apiGroups: [\"coordination.k8s.io\"]\n")
+		sb.WriteString("    resources: [\"leases\"]\n")
+		sb.WriteString(fmt.Sprintf("    verbs: [%s]\n", formatVerbList(leaseVerbs)))
+	}
+
+	return fmt.Errorf("%s", sb.String())
+}
+
+// formatVerbList formats verbs for YAML output: "get", "list", "patch"
+func formatVerbList(verbs []string) string {
+	quoted := make([]string, len(verbs))
+	for i, v := range verbs {
+		quoted[i] = fmt.Sprintf("\"%s\"", v)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func waitForReadyPod(ctx context.Context, podName string) error {

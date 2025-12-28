@@ -272,7 +272,7 @@ rules:
   verbs: ["get", "create", "update"]
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "watch", "patch"]
+  verbs: ["get", "list", "patch"]
 ```
 
 Apply the included RBAC manifest:
