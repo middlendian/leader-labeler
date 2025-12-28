@@ -4,6 +4,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -243,6 +244,105 @@ func TestConfigurationDefaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.duration < tt.min || tt.duration > tt.max {
 				t.Errorf("duration %v is outside reasonable range [%v, %v]", tt.duration, tt.min, tt.max)
+			}
+		})
+	}
+}
+
+func TestFormatVerbList(t *testing.T) {
+	tests := []struct {
+		name     string
+		verbs    []string
+		expected string
+	}{
+		{
+			name:     "single verb",
+			verbs:    []string{"get"},
+			expected: `"get"`,
+		},
+		{
+			name:     "two verbs",
+			verbs:    []string{"get", "list"},
+			expected: `"get", "list"`,
+		},
+		{
+			name:     "multiple verbs",
+			verbs:    []string{"get", "list", "patch"},
+			expected: `"get", "list", "patch"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatVerbList(tt.verbs)
+			if result != tt.expected {
+				t.Errorf("formatVerbList(%v) = %q, expected %q", tt.verbs, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatPermissionError(t *testing.T) {
+	// Save and restore cfg
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg.Namespace = "test-ns"
+
+	tests := []struct {
+		name     string
+		missing  []PermissionCheck
+		contains []string
+	}{
+		{
+			name: "missing pod permissions",
+			missing: []PermissionCheck{
+				{Resource: "pods", APIGroup: "", Verb: "list"},
+				{Resource: "pods", APIGroup: "", Verb: "patch"},
+			},
+			contains: []string{
+				"missing required RBAC permissions",
+				"pods (core API): list, patch",
+				"Namespace: test-ns",
+				`apiGroups: [""]`,
+				`resources: ["pods"]`,
+				`"list"`,
+				`"patch"`,
+			},
+		},
+		{
+			name: "missing lease permissions",
+			missing: []PermissionCheck{
+				{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "create"},
+				{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "update"},
+			},
+			contains: []string{
+				"leases (coordination.k8s.io): create, update",
+				`apiGroups: ["coordination.k8s.io"]`,
+				`resources: ["leases"]`,
+			},
+		},
+		{
+			name: "missing both pod and lease permissions",
+			missing: []PermissionCheck{
+				{Resource: "pods", APIGroup: "", Verb: "get"},
+				{Resource: "leases", APIGroup: "coordination.k8s.io", Verb: "create"},
+			},
+			contains: []string{
+				"pods (core API): get",
+				"leases (coordination.k8s.io): create",
+				"To fix this, ensure the ServiceAccount has a Role and RoleBinding",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := formatPermissionError(tt.missing)
+			errStr := err.Error()
+			for _, substr := range tt.contains {
+				if !strings.Contains(errStr, substr) {
+					t.Errorf("error message missing expected substring %q:\n%s", substr, errStr)
+				}
 			}
 		})
 	}

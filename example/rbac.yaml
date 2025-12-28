@@ -18,10 +18,9 @@ rules:
 # Required for pod operations
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "watch", "patch"]
+  verbs: ["get", "list", "patch"]
   # get: Read pod status for readiness checks
   # list: Discover all participants (leader needs this)
-  # watch: Monitor for ready successors during leader shutdown
   # patch: Apply labels to pods (leader labels all participants)
 ---
 apiVersion: rbac.authorization.k8s.io/v1
