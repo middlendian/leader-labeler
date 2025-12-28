@@ -12,11 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/leaderelection"
@@ -269,81 +267,10 @@ func removeParticipationLabel(ctx context.Context, podName string) error {
 	return nil
 }
 
-// watchLeaseForEarlyElection monitors the Lease object and triggers early election
-// attempts when the lease holder is cleared or the lease is deleted.
-func watchLeaseForEarlyElection(ctx context.Context, triggerChan chan<- struct{}) {
-	watcher, err := client.CoordinationV1().Leases(cfg.Namespace).Watch(ctx, metav1.ListOptions{
-		FieldSelector: "metadata.name=" + cfg.ElectionName,
-	})
-	if err != nil {
-		slog.Warn("failed to start lease watcher, falling back to polling", "error", err)
-		return
-	}
-	defer watcher.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				slog.Debug("lease watcher channel closed")
-				return
-			}
-
-			// Only trigger for non-leaders when lease becomes available
-			if isLeader.Load() {
-				continue
-			}
-
-			if event.Type == watch.Deleted {
-				slog.Info("lease deleted, triggering early election")
-				select {
-				case triggerChan <- struct{}{}:
-				default: // Don't block if channel full
-				}
-				continue
-			}
-
-			if event.Type == watch.Modified {
-				lease, ok := event.Object.(*coordinationv1.Lease)
-				if !ok {
-					continue
-				}
-				if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
-					slog.Info("lease holder cleared, triggering early election")
-					select {
-					case triggerChan <- struct{}{}:
-					default:
-					}
-				}
-			}
-		}
-	}
-}
-
 func runLeaderElection(ctx context.Context) {
-	triggerChan := make(chan struct{}, 1)
-
-	// Start the lease watcher for early election triggering
-	go watchLeaseForEarlyElection(ctx, triggerChan)
-
 	for ctx.Err() == nil {
 		// Create a cancellable context for this election cycle
 		electionCtx, electionCancel := context.WithCancel(ctx)
-
-		// Goroutine to cancel election on early trigger (for non-leaders only)
-		go func() {
-			select {
-			case <-electionCtx.Done():
-				return
-			case <-triggerChan:
-				if !isLeader.Load() {
-					slog.Debug("early election trigger received, restarting election cycle")
-					electionCancel()
-				}
-			}
-		}()
 
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{

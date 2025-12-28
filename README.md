@@ -150,7 +150,7 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
+      maxSurge: 100%      # Ensures new pods are Ready before old ones terminate
       maxUnavailable: 0
   template:
     spec:
@@ -221,26 +221,18 @@ spec:
 
 ### Graceful Shutdown
 
-**Zero-downtime deployments** through intelligent shutdown handling:
+**Zero-downtime deployments** through clean shutdown handling:
 
-#### Follower Shutdown
+#### Any Pod Shutdown
 1. Receives SIGTERM
 2. Removes participation label immediately
-3. Exits leader election
+3. Releases the lease (if leader)
 4. Terminates
 
-#### Leader Shutdown
-1. Receives SIGTERM
-2. Removes participation label immediately
-3. Enters **draining mode**:
-   - Continues renewing the lease (stays as leader)
-   - Keeps `is-leader=true` label (continues serving traffic)
-   - Waits for another ready participant to appear
-4. Once a successor is ready, releases the lease
-5. New leader is elected immediately
-6. Old leader terminates
-
-**Timeout**: Leader draining uses the pod's `terminationGracePeriodSeconds` (typically 30s). If no successor appears before timeout, the leader forcefully exits.
+With `maxSurge: 100%` rolling updates, new pods are Ready and participating in the election **before** SIGTERM is sent to old pods. This ensures:
+- A successor is always available to take over leadership
+- Leadership transfer happens within the `retry-period` (default 2s)
+- No draining timeout logic is needed
 
 ### Traffic Continuity
 
@@ -253,23 +245,24 @@ This ensures the pod remains Ready and in the Service endpoints while waiting fo
 
 ## Rolling Update Strategy
 
-For zero-downtime deployments, use this strategy:
+For zero-downtime deployments, use `maxSurge: 100%` to ensure new pods are Ready before old ones terminate:
 
 ```yaml
 strategy:
   type: RollingUpdate
   rollingUpdate:
-    maxSurge: 1         # Create new pod before terminating old one
+    maxSurge: 100%      # Double pods temporarily for smooth transition
     maxUnavailable: 0   # Never go below desired replicas
 ```
 
 **Why this works**:
-1. Kubernetes creates a new pod (allowed by `maxSurge: 1`)
-2. New pod becomes Ready and joins the election
-3. Kubernetes sends SIGTERM to an old pod
-4. Old leader sees new participant, immediately releases lease
-5. Leadership transfers smoothly, old pod exits
-6. Process repeats for remaining pods
+1. Kubernetes creates new pods (all replicas) before terminating old ones
+2. New pods become Ready and join the election
+3. Kubernetes sends SIGTERM to old pods
+4. Old leader releases lease, new follower acquires within `retry-period` (2s)
+5. Leadership transfers smoothly, old pods exit
+
+This approach temporarily doubles the number of pods during updates, but ensures successors are always available before any termination begins.
 
 ## RBAC Requirements
 

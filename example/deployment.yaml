@@ -9,12 +9,14 @@ metadata:
 spec:
   replicas: 2  # Minimum for leader/follower pattern
 
-  # CRITICAL: Rolling update strategy for zero-downtime deployments
+  # Rolling update strategy for zero-downtime deployments
+  # maxSurge: 100% ensures new pods are Ready before old ones terminate,
+  # giving new candidates time to join the election before SIGTERM is sent.
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1         # Allow 1 extra pod during update (enables smooth transition)
-      maxUnavailable: 0   # Never have fewer than desired replicas
+      maxSurge: 100%        # Double pods temporarily to ensure smooth leadership transition
+      maxUnavailable: 0     # Never have fewer than desired replicas
 
   selector:
     matchLabels:
