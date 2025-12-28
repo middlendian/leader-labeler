@@ -19,11 +19,8 @@
     "ghcr.io/devcontainers-extra/features/claude-code:1.0.0": {
       "version": "v2.0.74"
     },
-    "ghcr.io/middlendian/devcontainer-features/sudo-network-sandbox:0.1.0": {
-      "allowedDomains": "api.anthropic.com, api.github.com"
-    },
-    "ghcr.io/azutake/devcontainer-features/go-packages-install:0.0.2": {
-      "PACKAGES": "github.com/hashicorp/copywrite@v0.22.0"
+    "ghcr.io/rocker-org/devcontainer-features/apt-packages:1.0.2": {
+      "packages": "socat,bubblewrap"
     }
   },
   "containerUser": "vscode",
