@@ -26,14 +26,13 @@ import (
 
 // Config holds all configuration for the leader-labeler
 type Config struct {
-	ElectionName       string
-	PodName            string
-	Namespace          string
-	LeadershipLabel    string
-	ParticipationLabel string
-	LeaseDuration      time.Duration
-	RenewDeadline      time.Duration
-	RetryPeriod        time.Duration
+	ElectionName    string
+	PodName         string
+	Namespace       string
+	LeadershipLabel string
+	LeaseDuration   time.Duration
+	RenewDeadline   time.Duration
+	RetryPeriod     time.Duration
 }
 
 var (
@@ -81,9 +80,9 @@ func main() {
 
 	slog.Info("pod ready, joining election")
 
-	// Apply participation label to this pod
-	if err := applyParticipationLabel(ctx, pod.Name); err != nil {
-		slog.Error("failed to apply participation label", "error", err)
+	// Apply initial leader label (false) to this pod
+	if err := labelPod(ctx, pod.Name, false); err != nil {
+		slog.Error("failed to apply leader label", "error", err, "label", cfg.LeadershipLabel)
 		os.Exit(1)
 	}
 
@@ -93,7 +92,7 @@ func main() {
 
 	go func() {
 		<-sigChan
-		handleShutdown(ctx, cancel)
+		handleShutdown(cancel)
 	}()
 
 	// Run leader election (blocks until shutdown)
@@ -113,7 +112,6 @@ func parseConfig(args []string) (*Config, error) {
 	fs.StringVar(&c.PodName, "pod-name", os.Getenv("POD_NAME"), "Name of this pod")
 	fs.StringVar(&c.Namespace, "pod-namespace", os.Getenv("POD_NAMESPACE"), "Namespace of this pod")
 	fs.StringVar(&c.LeadershipLabel, "leadership-label", "", "Label for leader status (default: <election-name>/is-leader)")
-	fs.StringVar(&c.ParticipationLabel, "participation-label", "", "Label for participants (default: <election-name>/is-participant)")
 	fs.DurationVar(&c.LeaseDuration, "lease-duration", 15*time.Second, "Lease duration")
 	fs.DurationVar(&c.RenewDeadline, "renew-deadline", 10*time.Second, "Renew deadline")
 	fs.DurationVar(&c.RetryPeriod, "retry-period", 2*time.Second, "Retry period")
@@ -134,12 +132,10 @@ func parseConfig(args []string) (*Config, error) {
 		return nil, fmt.Errorf("--pod-namespace is required (or set POD_NAMESPACE env var)")
 	}
 
-	// Set default labels if not provided
-	c.LeadershipLabel, c.ParticipationLabel = determineLabelNames(
-		c.ElectionName,
-		c.LeadershipLabel,
-		c.ParticipationLabel,
-	)
+	// Set default leadership label if not provided
+	if c.LeadershipLabel == "" {
+		c.LeadershipLabel = c.ElectionName + "/is-leader"
+	}
 
 	return c, nil
 }
@@ -151,17 +147,6 @@ func parseFlags() {
 		os.Exit(1)
 	}
 	cfg = *c
-}
-
-// determineLabelNames generates default label names based on the election name if custom labels aren't provided.
-func determineLabelNames(electionName, leadershipLabel, participationLabel string) (string, string) {
-	if leadershipLabel == "" {
-		leadershipLabel = electionName + "/is-leader"
-	}
-	if participationLabel == "" {
-		participationLabel = electionName + "/is-participant"
-	}
-	return leadershipLabel, participationLabel
 }
 
 func setupLogger() {
@@ -217,59 +202,6 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
-func applyParticipationLabel(ctx context.Context, podName string) error {
-	pod, err := client.CoreV1().Pods(cfg.Namespace).Get(ctx, podName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get pod: %w", err)
-	}
-
-	if pod.Labels == nil {
-		pod.Labels = make(map[string]string)
-	}
-	pod.Labels[cfg.ParticipationLabel] = "true"
-
-	patchData := map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"labels": map[string]string{
-				cfg.ParticipationLabel: "true",
-			},
-		},
-	}
-	patchBytes, _ := json.Marshal(patchData)
-
-	_, err = client.CoreV1().Pods(cfg.Namespace).Patch(ctx, podName,
-		types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to patch pod: %w", err)
-	}
-
-	slog.Info("applied participation label",
-		"pod_name", podName,
-		"label", cfg.ParticipationLabel)
-	return nil
-}
-
-func removeParticipationLabel(ctx context.Context, podName string) error {
-	patchData := map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"labels": map[string]interface{}{
-				cfg.ParticipationLabel: nil, // Setting to nil removes the label
-			},
-		},
-	}
-	patchBytes, _ := json.Marshal(patchData)
-
-	_, err := client.CoreV1().Pods(cfg.Namespace).Patch(ctx, podName,
-		types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
-	if err != nil {
-		slog.Error("failed to remove participation label", "error", err, "pod_name", podName)
-		return err
-	}
-
-	slog.Info("removed participation label", "pod_name", podName)
-	return nil
-}
-
 func runLeaderElection(ctx context.Context) {
 	for ctx.Err() == nil {
 		// Create a cancellable context for this election cycle
@@ -286,10 +218,6 @@ func runLeaderElection(ctx context.Context) {
 			},
 		}
 
-		// Reconciliation context and cancel function for leader
-		var reconcileCtx context.Context
-		var reconcileCancel context.CancelFunc
-
 		leaderelection.RunOrDie(electionCtx, leaderelection.LeaderElectionConfig{
 			Lock:            lock,
 			ReleaseOnCancel: true,
@@ -301,14 +229,10 @@ func runLeaderElection(ctx context.Context) {
 					isLeader.Store(true)
 					slog.Info("became leader", "pod_name", cfg.PodName)
 
-					// Start reconciliation loop
-					reconcileCtx, reconcileCancel = context.WithCancel(ctx)
-					go reconcileLabels(reconcileCtx)
+					// Reconcile all participants (sets is-leader=true on self, false on others)
+					reconcileLabels(ctx)
 				},
 				OnStoppedLeading: func() {
-					if reconcileCancel != nil {
-						reconcileCancel()
-					}
 					isLeader.Store(false)
 					slog.Warn("lost leadership", "pod_name", cfg.PodName)
 				},
@@ -329,27 +253,11 @@ func runLeaderElection(ctx context.Context) {
 	}
 }
 
+// reconcileLabels sets is-leader=false on all other participants.
+// Called once when this pod becomes leader.
 func reconcileLabels(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	// Run immediately on start
-	performReconciliation(ctx)
-
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("stopping label reconciliation")
-			return
-		case <-ticker.C:
-			performReconciliation(ctx)
-		}
-	}
-}
-
-func performReconciliation(ctx context.Context) {
-	// List all participants
-	labelSelector := fmt.Sprintf("%s=true", cfg.ParticipationLabel)
+	// List all pods with the leadership label (any value)
+	labelSelector := cfg.LeadershipLabel
 	pods, err := client.CoreV1().Pods(cfg.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
@@ -381,8 +289,7 @@ func labelPod(ctx context.Context, podName string, isLeaderPod bool) error {
 	patchData := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"labels": map[string]string{
-				cfg.ParticipationLabel: "true",
-				cfg.LeadershipLabel:    leaderValue,
+				cfg.LeadershipLabel: leaderValue,
 			},
 		},
 	}
@@ -415,16 +322,7 @@ func labelPod(ctx context.Context, podName string, isLeaderPod bool) error {
 	return nil
 }
 
-func handleShutdown(ctx context.Context, cancel context.CancelFunc) {
-	slog.Info("shutdown signal received, removing participation label")
-
-	// Remove participation label immediately
-	removeCtx, removeCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer removeCancel()
-	if err := removeParticipationLabel(removeCtx, cfg.PodName); err != nil {
-		slog.Error("failed to remove participation label during shutdown", "error", err)
-	}
-
-	slog.Info("releasing leadership and terminating")
+func handleShutdown(cancel context.CancelFunc) {
+	slog.Info("shutdown signal received, releasing leadership and terminating")
 	cancel()
 }

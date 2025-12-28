@@ -109,12 +109,9 @@ func TestParseConfig(t *testing.T) {
 				if c.Namespace != "default" {
 					t.Errorf("Namespace = %v, expected default", c.Namespace)
 				}
-				// Check default labels are generated
+				// Check default label is generated
 				if c.LeadershipLabel != "my-app/is-leader" {
 					t.Errorf("LeadershipLabel = %v, expected my-app/is-leader", c.LeadershipLabel)
-				}
-				if c.ParticipationLabel != "my-app/is-participant" {
-					t.Errorf("ParticipationLabel = %v, expected my-app/is-participant", c.ParticipationLabel)
 				}
 				// Check default durations
 				if c.LeaseDuration != 15*time.Second {
@@ -123,21 +120,17 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "custom labels",
+			name: "custom leadership label",
 			args: []string{
 				"--election-name=my-app",
 				"--pod-name=my-pod",
 				"--pod-namespace=default",
 				"--leadership-label=custom/leader",
-				"--participation-label=custom/member",
 			},
 			expectError: false,
 			validate: func(t *testing.T, c *Config) {
 				if c.LeadershipLabel != "custom/leader" {
 					t.Errorf("LeadershipLabel = %v, expected custom/leader", c.LeadershipLabel)
-				}
-				if c.ParticipationLabel != "custom/member" {
-					t.Errorf("ParticipationLabel = %v, expected custom/member", c.ParticipationLabel)
 				}
 			},
 		},
@@ -214,75 +207,6 @@ func TestParseConfig(t *testing.T) {
 
 			if tt.validate != nil {
 				tt.validate(t, config)
-			}
-		})
-	}
-}
-
-func TestApplyDefaultLabels(t *testing.T) {
-	tests := []struct {
-		name                       string
-		electionName               string
-		inputLeadershipLabel       string
-		inputParticipationLabel    string
-		expectedLeadershipLabel    string
-		expectedParticipationLabel string
-	}{
-		{
-			name:                       "generates default labels when empty",
-			electionName:               "my-app",
-			inputLeadershipLabel:       "",
-			inputParticipationLabel:    "",
-			expectedLeadershipLabel:    "my-app/is-leader",
-			expectedParticipationLabel: "my-app/is-participant",
-		},
-		{
-			name:                       "preserves custom leadership label",
-			electionName:               "my-app",
-			inputLeadershipLabel:       "custom/leader",
-			inputParticipationLabel:    "",
-			expectedLeadershipLabel:    "custom/leader",
-			expectedParticipationLabel: "my-app/is-participant",
-		},
-		{
-			name:                       "preserves custom participation label",
-			electionName:               "my-app",
-			inputLeadershipLabel:       "",
-			inputParticipationLabel:    "custom/member",
-			expectedLeadershipLabel:    "my-app/is-leader",
-			expectedParticipationLabel: "custom/member",
-		},
-		{
-			name:                       "preserves both custom labels",
-			electionName:               "my-app",
-			inputLeadershipLabel:       "custom/leader",
-			inputParticipationLabel:    "custom/member",
-			expectedLeadershipLabel:    "custom/leader",
-			expectedParticipationLabel: "custom/member",
-		},
-		{
-			name:                       "handles election name with dashes",
-			electionName:               "prod-service",
-			inputLeadershipLabel:       "",
-			inputParticipationLabel:    "",
-			expectedLeadershipLabel:    "prod-service/is-leader",
-			expectedParticipationLabel: "prod-service/is-participant",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			leadershipLabel, participationLabel := determineLabelNames(
-				tt.electionName,
-				tt.inputLeadershipLabel,
-				tt.inputParticipationLabel,
-			)
-
-			if leadershipLabel != tt.expectedLeadershipLabel {
-				t.Errorf("leadershipLabel = %v, expected %v", leadershipLabel, tt.expectedLeadershipLabel)
-			}
-			if participationLabel != tt.expectedParticipationLabel {
-				t.Errorf("participationLabel = %v, expected %v", participationLabel, tt.expectedParticipationLabel)
 			}
 		})
 	}

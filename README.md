@@ -29,7 +29,7 @@ Kubernetes for applications that:
   Kubernetes objects and clients can also use these labels to easily identify the leader and follower pods.
 * The sidecar handles graceful startup and termination to minimize downtime during normal deployments and other
   operational activities.
-* Timeouts, update intervals, and label names are all configurable according to your needs.
+* Timeouts and label names are configurable according to your needs.
 
 ## Quick Start
 
@@ -113,7 +113,6 @@ make docker-push
 | `--pod-name` | No | `$POD_NAME` | Name of the current pod. Usually set via downward API. |
 | `--pod-namespace` | No | `$POD_NAMESPACE` | Namespace of the pod and lease. Usually set via downward API. |
 | `--leadership-label` | No | `<election-name>/is-leader` | Label key for leader status (`true` or `false`). |
-| `--participation-label` | No | `<election-name>/is-participant` | Label key for active participants (`true` when participating). |
 | `--lease-duration` | No | `15s` | How long non-leaders wait before attempting to acquire leadership. |
 | `--renew-deadline` | No | `10s` | How long the leader has to renew leadership before giving up. |
 | `--retry-period` | No | `2s` | How often to retry leadership actions. |
@@ -184,14 +183,13 @@ spec:
   - port: 80
 ```
 
-### Custom Label Names
+### Custom Label Name
 
 ```yaml
 - name: leader-labeler
   args:
   - --election-name=database
   - --leadership-label=db.example.com/primary
-  - --participation-label=db.example.com/member
 ```
 
 ### Tuning for Fast Failover
@@ -213,11 +211,11 @@ spec:
 
 1. Each pod runs the leader-labeler sidecar
 2. Sidecars wait for the main container to become Ready
-3. Ready pods apply the participation label (`<election-name>/is-participant=true`)
+3. Ready pods apply the label `<election-name>/is-leader=false` to themselves
 4. Pods participate in leader election using Kubernetes Lease objects
-5. The leader continuously reconciles labels every 5 seconds:
+5. When a pod becomes leader, it reconciles all labels:
    - Sets `<election-name>/is-leader=true` on itself
-   - Sets `<election-name>/is-leader=false` on all other participants
+   - Sets `<election-name>/is-leader=false` on all other pods with the label
 
 ### Graceful Shutdown
 
@@ -225,9 +223,8 @@ spec:
 
 #### Any Pod Shutdown
 1. Receives SIGTERM
-2. Removes participation label immediately
-3. Releases the lease (if leader)
-4. Terminates
+2. Releases the lease (if leader)
+3. Terminates
 
 With `maxSurge: 100%` rolling updates, new pods are Ready and participating in the election **before** SIGTERM is sent to old pods. This ensures:
 - A successor is always available to take over leadership
@@ -307,9 +304,9 @@ kubectl logs -l app=my-app -c leader-labeler --tail=50
 - Check sidecar logs for errors
 
 **Labels not appearing**
-- Ensure pods have the participation label after becoming Ready
-- Verify the leader pod has no errors in its logs
-- Check RBAC allows `patch` on pods
+- Verify pods are Ready (label is applied after readiness)
+- Check the leader pod has no errors in its logs
+- Ensure RBAC allows `patch` on pods
 
 **Leadership flapping**
 - Check network connectivity between pods and API server
