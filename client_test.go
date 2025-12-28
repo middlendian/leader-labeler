@@ -84,8 +84,7 @@ func TestValidatePermissions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			//nolint:staticcheck // NewClientset requires generated apply configs
-			client := fake.NewSimpleClientset()
+			client := fake.NewClientset()
 
 			// Add reactor to control SSAR responses
 			client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -165,8 +164,7 @@ func TestCheckPermission(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			//nolint:staticcheck // NewClientset requires generated apply configs
-			client := fake.NewSimpleClientset()
+			client := fake.NewClientset()
 
 			client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 				if tt.reactorErr != nil {

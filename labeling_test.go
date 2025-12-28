@@ -72,8 +72,7 @@ func TestLabelPod(t *testing.T) {
 				},
 			}
 
-			//nolint:staticcheck // NewClientset requires generated apply configs
-			client := fake.NewSimpleClientset(pod)
+			client := fake.NewClientset(pod)
 
 			// Track attempt count
 			var attempts int32
@@ -208,8 +207,7 @@ func TestReconcileLabels(t *testing.T) {
 				objects[i] = pod
 			}
 
-			//nolint:staticcheck // NewClientset requires generated apply configs
-			client := fake.NewSimpleClientset(objects...)
+			client := fake.NewClientset(objects...)
 
 			// Add reactor to simulate self-label failure if needed
 			if tt.selfLabelFails {
@@ -286,8 +284,7 @@ func TestReconcileLabels_SkipsCorrectlyLabeledPods(t *testing.T) {
 		objects[i] = pod
 	}
 
-	//nolint:staticcheck // NewClientset requires generated apply configs
-	client := fake.NewSimpleClientset(objects...)
+	client := fake.NewClientset(objects...)
 
 	// Track which pods were patched
 	var patchedPods []string

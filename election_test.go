@@ -131,8 +131,7 @@ func TestWaitForReadyPod(t *testing.T) {
 				},
 			}
 
-			//nolint:staticcheck // NewClientset requires generated apply configs
-			client := fake.NewSimpleClientset(pod)
+			client := fake.NewClientset(pod)
 
 			cfg := &Config{
 				PodName:   "test-pod",
@@ -176,8 +175,7 @@ func TestWaitForReadyPod_BecomesReadyAfterPolling(t *testing.T) {
 		},
 	}
 
-	//nolint:staticcheck // NewClientset requires generated apply configs
-	client := fake.NewSimpleClientset(pod)
+	client := fake.NewClientset(pod)
 
 	cfg := &Config{
 		PodName:   "test-pod",
@@ -219,8 +217,7 @@ func TestRunElection_InitialSetup(t *testing.T) {
 	}
 
 	objects := []runtime.Object{pod}
-	//nolint:staticcheck // NewClientset requires generated apply configs
-	client := fake.NewSimpleClientset(objects...)
+	client := fake.NewClientset(objects...)
 
 	cfg := &Config{
 		PodName:         "test-pod",
