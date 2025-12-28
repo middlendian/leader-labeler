@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -65,7 +66,8 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 }
 
 // ApplyAllLabels sets is-leader=true on self, is-leader=false on all other participants.
-// Called once when this pod becomes leader. Returns an error if labeling self fails.
+// Called once when this pod becomes leader. Returns an error if labeling any pod fails,
+// which should trigger a leadership release to ensure consistent state.
 func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
 	// List all pods with the leadership label (any value)
 	labelSelector := cfg.LeadershipLabel
@@ -76,22 +78,22 @@ func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Confi
 		return fmt.Errorf("failed to list participant pods: %w", err)
 	}
 
-	// First, label self as leader (critical - must succeed)
-	if err := LabelPod(ctx, client, cfg, cfg.PodName, true); err != nil {
-		return fmt.Errorf("failed to label self as leader: %w", err)
-	}
-
-	// Then, label others in parallel (best effort - just log errors)
+	// Apply labels to all pods in parallel (including self)
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var errs []error
+
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		if pod.Name == cfg.PodName {
-			continue // Already labeled self above
+		isLeader := pod.Name == cfg.PodName
+		targetValue := "false"
+		if isLeader {
+			targetValue = "true"
 		}
 
 		// Skip if label already has the correct value
 		currentValue := pod.Labels[cfg.LeadershipLabel]
-		if currentValue == "false" {
+		if currentValue == targetValue {
 			slog.Debug("skipping pod, label already correct",
 				"pod_name", pod.Name,
 				cfg.LeadershipLabel, currentValue)
@@ -100,14 +102,18 @@ func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Confi
 
 		// Update label in parallel
 		wg.Go(func() {
-			if err := LabelPod(ctx, client, cfg, pod.Name, false); err != nil {
-				slog.Error("failed to label pod during reconciliation",
-					"error", err,
-					"pod_name", pod.Name)
+			if err := LabelPod(ctx, client, cfg, pod.Name, isLeader); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("pod %s: %w", pod.Name, err))
+				mu.Unlock()
 			}
 		})
 	}
 	wg.Wait()
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to apply labels: %w", errors.Join(errs...))
+	}
 
 	slog.Debug("reconciliation complete", "participant_count", len(pods.Items))
 	return nil

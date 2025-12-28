@@ -133,12 +133,12 @@ func TestLabelPod(t *testing.T) {
 
 func TestReconcileLabels(t *testing.T) {
 	tests := []struct {
-		name           string
-		selfPodName    string
-		existingPods   []*corev1.Pod
-		selfLabelFails bool
-		wantErr        bool
-		wantLabels     map[string]string // podName -> expected label value
+		name         string
+		selfPodName  string
+		existingPods []*corev1.Pod
+		failPodName  string // pod name to fail labeling for (empty = no failure)
+		wantErr      bool
+		wantLabels   map[string]string // podName -> expected label value
 	}{
 		{
 			name:        "reconcile with no other pods",
@@ -191,11 +191,41 @@ func TestReconcileLabels(t *testing.T) {
 			},
 		},
 		{
-			name:           "fails if self label fails",
-			selfPodName:    "leader-pod",
-			existingPods:   []*corev1.Pod{},
-			selfLabelFails: true,
-			wantErr:        true,
+			name:        "fails if self label fails",
+			selfPodName: "leader-pod",
+			existingPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "leader-pod",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "false"},
+					},
+				},
+			},
+			failPodName: "leader-pod",
+			wantErr:     true,
+		},
+		{
+			name:        "fails if follower label fails",
+			selfPodName: "leader-pod",
+			existingPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "leader-pod",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "false"},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "follower-1",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "true"}, // needs update
+					},
+				},
+			},
+			failPodName: "follower-1",
+			wantErr:     true,
 		},
 	}
 
@@ -209,12 +239,12 @@ func TestReconcileLabels(t *testing.T) {
 
 			client := fake.NewClientset(objects...)
 
-			// Add reactor to simulate self-label failure if needed
-			if tt.selfLabelFails {
+			// Add reactor to simulate label failure if needed
+			if tt.failPodName != "" {
 				client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 					patchAction := action.(k8stesting.PatchAction)
-					if patchAction.GetName() == tt.selfPodName {
-						return true, nil, errors.New("simulated self-label failure")
+					if patchAction.GetName() == tt.failPodName {
+						return true, nil, errors.New("simulated label failure")
 					}
 					return false, nil, nil
 				})
@@ -261,58 +291,126 @@ func TestReconcileLabels(t *testing.T) {
 }
 
 func TestReconcileLabels_SkipsCorrectlyLabeledPods(t *testing.T) {
-	// Pods that already have the correct label value should be skipped
-	existingPods := []*corev1.Pod{
+	tests := []struct {
+		name         string
+		existingPods []*corev1.Pod
+		selfPodName  string
+		wantPatched  []string
+	}{
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "leader-pod",
-				Namespace: "default",
-				Labels:    map[string]string{"test/is-leader": "false"},
+			name: "skips follower already labeled false",
+			existingPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "leader-pod",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "false"},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "already-false",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "false"},
+					},
+				},
 			},
+			selfPodName: "leader-pod",
+			wantPatched: []string{"leader-pod"},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "already-false",
-				Namespace: "default",
-				Labels:    map[string]string{"test/is-leader": "false"},
+			name: "skips leader already labeled true",
+			existingPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "leader-pod",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "true"}, // already correct
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "needs-update",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "true"}, // was old leader
+					},
+				},
 			},
+			selfPodName: "leader-pod",
+			wantPatched: []string{"needs-update"},
+		},
+		{
+			name: "skips all when labels already correct",
+			existingPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "leader-pod",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "true"},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "follower",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "false"},
+					},
+				},
+			},
+			selfPodName: "leader-pod",
+			wantPatched: []string{}, // no patches needed
 		},
 	}
 
-	objects := make([]runtime.Object, len(existingPods))
-	for i, pod := range existingPods {
-		objects[i] = pod
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objects := make([]runtime.Object, len(tt.existingPods))
+			for i, pod := range tt.existingPods {
+				objects[i] = pod
+			}
 
-	client := fake.NewClientset(objects...)
+			client := fake.NewClientset(objects...)
 
-	// Track which pods were patched
-	var patchedPods []string
-	client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		patchAction := action.(k8stesting.PatchAction)
-		patchedPods = append(patchedPods, patchAction.GetName())
-		return false, nil, nil // let default handler process
-	})
+			// Track which pods were patched
+			var patchedPods []string
+			client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				patchAction := action.(k8stesting.PatchAction)
+				patchedPods = append(patchedPods, patchAction.GetName())
+				return false, nil, nil // let default handler process
+			})
 
-	cfg := &Config{
-		PodName:         "leader-pod",
-		Namespace:       "default",
-		LeadershipLabel: "test/is-leader",
-	}
+			cfg := &Config{
+				PodName:         tt.selfPodName,
+				Namespace:       "default",
+				LeadershipLabel: "test/is-leader",
+			}
 
-	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-	defer cancel()
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
 
-	err := ApplyAllLabels(ctx, client, cfg)
-	if err != nil {
-		t.Fatalf("ApplyAllLabels() error: %v", err)
-	}
+			err := ApplyAllLabels(ctx, client, cfg)
+			if err != nil {
+				t.Fatalf("ApplyAllLabels() error: %v", err)
+			}
 
-	// Only leader-pod should be patched, already-false should be skipped
-	if len(patchedPods) != 1 {
-		t.Errorf("expected 1 pod to be patched, got %d: %v", len(patchedPods), patchedPods)
-	}
-	if len(patchedPods) > 0 && patchedPods[0] != "leader-pod" {
-		t.Errorf("expected leader-pod to be patched, got %s", patchedPods[0])
+			if len(patchedPods) != len(tt.wantPatched) {
+				t.Errorf("expected %d pods to be patched, got %d: %v", len(tt.wantPatched), len(patchedPods), patchedPods)
+				return
+			}
+
+			// Check each expected pod was patched (order may vary due to parallelism)
+			for _, want := range tt.wantPatched {
+				found := false
+				for _, got := range patchedPods {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected pod %s to be patched, but it wasn't. Patched pods: %v", want, patchedPods)
+				}
+			}
+		})
 	}
 }
