@@ -23,7 +23,7 @@
       "allowedDomains": "api.anthropic.com, api.github.com"
     },
     "ghcr.io/azutake/devcontainer-features/go-packages-install:0.0.2": {
-      "PACKAGES": "copywrite@0.22.0"
+      "PACKAGES": "github.com/hashicorp/copywrite@v0.22.0"
     }
   },
   "containerUser": "vscode",
