@@ -48,24 +48,13 @@ lint: ## Run linter (requires golangci-lint)
 	@echo "Running linter..."
 	@golangci-lint run
 
-.PHONY: docker-build
-docker-build: ## Build Docker image
+.PHONY: image
+image: ## Build Docker image for local architecture
 	@echo "Building Docker image..."
 	docker build -t $(REGISTRY)/$(APP_NAME):$(VERSION) .
 
-.PHONY: docker-push
-docker-push: ## Push Docker image
-	@echo "Pushing Docker image..."
-	docker push $(REGISTRY)/$(APP_NAME):$(VERSION)
-
-.PHONY: deps
-deps: ## Download dependencies
-	@echo "Downloading dependencies..."
-	$(GOMOD) download
-	$(GOMOD) tidy
-
-.PHONY: verify
-verify: fmt test ## Run formatting and tests
+.PHONY: check
+check: fmt test lint image ## Run all checks and validations
 	@echo "Verification complete"
 
 .DEFAULT_GOAL := help
