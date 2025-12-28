@@ -282,3 +282,235 @@ func TestFormatVerbList(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckPermission_PassesResourceName(t *testing.T) {
+	client := fake.NewClientset()
+
+	var capturedName string
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		createAction := action.(k8stesting.CreateAction)
+		review := createAction.GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		capturedName = review.Spec.ResourceAttributes.Name
+		review.Status.Allowed = true
+		return true, review, nil
+	})
+
+	cfg := &Config{
+		Namespace:    "default",
+		ElectionName: "my-election",
+	}
+
+	check := PermissionCheck{
+		Resource:     "leases",
+		APIGroup:     "coordination.k8s.io",
+		Verb:         "get",
+		ResourceName: "my-lease-name",
+	}
+
+	_, err := checkPermission(context.Background(), client, cfg, check)
+	if err != nil {
+		t.Fatalf("checkPermission() error: %v", err)
+	}
+
+	if capturedName != "my-lease-name" {
+		t.Errorf("ResourceAttributes.Name = %q, want %q", capturedName, "my-lease-name")
+	}
+}
+
+func TestCheckPermission_PassesCorrectNamespace(t *testing.T) {
+	client := fake.NewClientset()
+
+	var capturedNamespace string
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		createAction := action.(k8stesting.CreateAction)
+		review := createAction.GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		capturedNamespace = review.Spec.ResourceAttributes.Namespace
+		review.Status.Allowed = true
+		return true, review, nil
+	})
+
+	cfg := &Config{
+		Namespace: "my-custom-namespace",
+	}
+
+	check := PermissionCheck{
+		Resource: "pods",
+		Verb:     "get",
+	}
+
+	_, err := checkPermission(context.Background(), client, cfg, check)
+	if err != nil {
+		t.Fatalf("checkPermission() error: %v", err)
+	}
+
+	if capturedNamespace != "my-custom-namespace" {
+		t.Errorf("ResourceAttributes.Namespace = %q, want %q", capturedNamespace, "my-custom-namespace")
+	}
+}
+
+func TestCheckPermission_PassesAPIGroup(t *testing.T) {
+	tests := []struct {
+		name      string
+		check     PermissionCheck
+		wantGroup string
+	}{
+		{
+			name: "core API group (empty)",
+			check: PermissionCheck{
+				Resource: "pods",
+				APIGroup: "",
+				Verb:     "get",
+			},
+			wantGroup: "",
+		},
+		{
+			name: "coordination API group",
+			check: PermissionCheck{
+				Resource: "leases",
+				APIGroup: "coordination.k8s.io",
+				Verb:     "get",
+			},
+			wantGroup: "coordination.k8s.io",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset()
+
+			var capturedGroup string
+			client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				createAction := action.(k8stesting.CreateAction)
+				review := createAction.GetObject().(*authorizationv1.SelfSubjectAccessReview)
+				capturedGroup = review.Spec.ResourceAttributes.Group
+				review.Status.Allowed = true
+				return true, review, nil
+			})
+
+			cfg := &Config{Namespace: "default"}
+
+			_, err := checkPermission(context.Background(), client, cfg, tt.check)
+			if err != nil {
+				t.Fatalf("checkPermission() error: %v", err)
+			}
+
+			if capturedGroup != tt.wantGroup {
+				t.Errorf("ResourceAttributes.Group = %q, want %q", capturedGroup, tt.wantGroup)
+			}
+		})
+	}
+}
+
+func TestValidatePermissions_ChecksAllRequiredPermissions(t *testing.T) {
+	client := fake.NewClientset()
+
+	// Collect all permission checks
+	type permCheck struct {
+		Resource string
+		Verb     string
+		Group    string
+		Name     string
+	}
+	var capturedChecks []permCheck
+
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		createAction := action.(k8stesting.CreateAction)
+		review := createAction.GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		attrs := review.Spec.ResourceAttributes
+
+		capturedChecks = append(capturedChecks, permCheck{
+			Resource: attrs.Resource,
+			Verb:     attrs.Verb,
+			Group:    attrs.Group,
+			Name:     attrs.Name,
+		})
+
+		review.Status.Allowed = true
+		return true, review, nil
+	})
+
+	cfg := &Config{
+		ElectionName: "test-election",
+		Namespace:    "default",
+	}
+
+	err := validatePermissions(context.Background(), client, cfg)
+	if err != nil {
+		t.Fatalf("validatePermissions() error: %v", err)
+	}
+
+	// Expected checks
+	expectedChecks := []permCheck{
+		{Resource: "pods", Verb: "get", Group: "", Name: ""},
+		{Resource: "pods", Verb: "list", Group: "", Name: ""},
+		{Resource: "pods", Verb: "patch", Group: "", Name: ""},
+		{Resource: "leases", Verb: "get", Group: "coordination.k8s.io", Name: "test-election"},
+		{Resource: "leases", Verb: "create", Group: "coordination.k8s.io", Name: "test-election"},
+		{Resource: "leases", Verb: "update", Group: "coordination.k8s.io", Name: "test-election"},
+	}
+
+	if len(capturedChecks) != len(expectedChecks) {
+		t.Fatalf("expected %d permission checks, got %d: %+v", len(expectedChecks), len(capturedChecks), capturedChecks)
+	}
+
+	// Build a set of expected checks for easy lookup
+	expectedSet := make(map[string]bool)
+	for _, e := range expectedChecks {
+		key := e.Resource + ":" + e.Verb + ":" + e.Group + ":" + e.Name
+		expectedSet[key] = true
+	}
+
+	// Verify each captured check is expected
+	for _, c := range capturedChecks {
+		key := c.Resource + ":" + c.Verb + ":" + c.Group + ":" + c.Name
+		if !expectedSet[key] {
+			t.Errorf("unexpected permission check: %+v", c)
+		}
+	}
+}
+
+func TestValidatePermissions_ContextCancellation(t *testing.T) {
+	client := fake.NewClientset()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel context on first SSAR call
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		cancel() // Cancel context
+		return true, nil, ctx.Err()
+	})
+
+	cfg := &Config{
+		ElectionName: "test-election",
+		Namespace:    "default",
+	}
+
+	err := validatePermissions(ctx, client, cfg)
+	if err == nil {
+		t.Error("validatePermissions() expected error on context cancellation, got nil")
+	}
+}
+
+func TestValidatePermissions_StopsOnFirstAPIError(t *testing.T) {
+	client := fake.NewClientset()
+
+	var checkCount int
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		checkCount++
+		return true, nil, errors.New("API server unavailable")
+	})
+
+	cfg := &Config{
+		ElectionName: "test-election",
+		Namespace:    "default",
+	}
+
+	err := validatePermissions(context.Background(), client, cfg)
+	if err == nil {
+		t.Error("validatePermissions() expected error, got nil")
+	}
+
+	if checkCount != 1 {
+		t.Errorf("expected 1 check before stopping, got %d", checkCount)
+	}
+}
