@@ -6,10 +6,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // Default configuration values
@@ -40,14 +41,6 @@ var (
 		return os.ReadFile(NamespaceFile)
 	}
 )
-
-// SetupLogger configures structured JSON logging to stdout
-func SetupLogger() {
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-	slog.SetDefault(slog.New(handler))
-}
 
 // detectNamespace reads the namespace from the service account token mount.
 // Returns empty string if the file doesn't exist or can't be read.
@@ -87,24 +80,24 @@ func LoadConfig(args []string) (*Config, error) {
 
 	// Parse arguments
 	if err := fs.Parse(args); err != nil {
-		slog.Error("failed to parse flags", "error", err)
+		klog.ErrorS(err, "failed to parse flags")
 		return nil, err
 	}
 
 	// Validate required flags
 	if cfg.ElectionName == "" {
 		err := fmt.Errorf("--election-name is required")
-		slog.Error("configuration error", "error", err)
+		klog.ErrorS(err, "configuration error")
 		return nil, err
 	}
 	if cfg.PodName == "" {
 		err := fmt.Errorf("--pod-name is required (auto-detection failed - not running in a standard pod?)")
-		slog.Error("configuration error", "error", err)
+		klog.ErrorS(err, "configuration error")
 		return nil, err
 	}
 	if cfg.PodNamespace == "" {
 		err := fmt.Errorf("--pod-namespace is required (auto-detection failed - service account token not mounted?)")
-		slog.Error("configuration error", "error", err)
+		klog.ErrorS(err, "configuration error")
 		return nil, err
 	}
 

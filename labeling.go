@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 )
 
 // LabelPod sets the leadership label on a pod with retry logic.
@@ -41,7 +41,7 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 		_, err := client.CoreV1().Pods(cfg.PodNamespace).Patch(ctx, podName,
 			types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
 		if err == nil {
-			slog.Info("labeled pod",
+			klog.InfoS("labeled pod",
 				"pod_name", podName,
 				cfg.LeadershipLabel, leaderValue)
 			return nil
@@ -53,10 +53,8 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 			return fmt.Errorf("deadline exceeded: %w", lastErr)
 		}
 
-		slog.Warn("label update failed, retrying",
-			"error", err,
-			"pod_name", podName,
-			"retry_period", cfg.RetryInterval)
+		klog.Warningf("label update failed (will retry); error=%v pod_name=%s retry_period=%v",
+			err, podName, cfg.RetryInterval)
 
 		select {
 		case <-ctx.Done():
@@ -73,6 +71,7 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
 	// List all pods with the leadership label (any value)
 	labelSelector := cfg.LeadershipLabel
+	klog.InfoS("reconciling pod labels", "selector", labelSelector)
 	pods, err := client.CoreV1().Pods(cfg.PodNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
@@ -96,7 +95,7 @@ func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Confi
 		// Skip if label already has the correct value
 		currentValue := pod.Labels[cfg.LeadershipLabel]
 		if currentValue == targetValue {
-			slog.Debug("skipping pod, label already correct",
+			klog.InfoS("pod label already correct",
 				"pod_name", pod.Name,
 				cfg.LeadershipLabel, currentValue)
 			continue
@@ -117,6 +116,6 @@ func ApplyAllLabels(ctx context.Context, client kubernetes.Interface, cfg *Confi
 		return fmt.Errorf("failed to apply labels: %w", errors.Join(errs...))
 	}
 
-	slog.Debug("reconciliation complete", "participant_count", len(pods.Items))
+	klog.InfoS("label reconciliation complete", "participant_count", len(pods.Items))
 	return nil
 }

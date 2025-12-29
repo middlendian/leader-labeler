@@ -5,19 +5,31 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"k8s.io/klog/v2"
 )
 
 func main() {
-	SetupLogger()
+	// configure klog with defaults
+	klog.InitFlags(nil)
+	defer klog.Flush()
 
 	cfg, err := LoadConfig(os.Args[1:])
 	if err != nil {
 		os.Exit(1) // LoadConfig logs its own errors
 	}
+
+	klog.InfoS("starting leader-labeler",
+		"election_name", cfg.ElectionName,
+		"pod_name", cfg.PodName,
+		"pod_namespace", cfg.PodNamespace,
+		"leadership_label", cfg.LeadershipLabel,
+		"lease_duration", cfg.LeaseDuration,
+		"timeout_deadline", cfg.TimeoutDeadline,
+		"retry_interval", cfg.RetryInterval)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	setupSignalHandler(cancel)
@@ -31,7 +43,7 @@ func main() {
 	if err := RunElection(ctx, client, cfg); err != nil {
 		os.Exit(1) // RunElection logs its own errors
 	}
-	slog.Info("leader-labeler terminated")
+	klog.InfoS("leader-labeler terminated")
 }
 
 func setupSignalHandler(cancel context.CancelFunc) {
@@ -39,7 +51,7 @@ func setupSignalHandler(cancel context.CancelFunc) {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-sigChan
-		slog.Info("shutdown signal received")
+		klog.InfoS("shutdown signal received")
 		cancel()
 	}()
 }
