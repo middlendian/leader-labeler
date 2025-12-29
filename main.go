@@ -22,6 +22,15 @@ func main() {
 		os.Exit(1) // LoadConfig logs its own errors
 	}
 
+	klog.InfoS("starting leader-labeler",
+		"election_name", cfg.ElectionName,
+		"pod_name", cfg.PodName,
+		"pod_namespace", cfg.PodNamespace,
+		"leadership_label", cfg.LeadershipLabel,
+		"lease_duration", cfg.LeaseDuration,
+		"timeout_deadline", cfg.TimeoutDeadline,
+		"retry_interval", cfg.RetryInterval)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	setupSignalHandler(cancel)
 	defer cancel()

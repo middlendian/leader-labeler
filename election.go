@@ -22,11 +22,6 @@ const (
 // RunElection waits for pod readiness, initializes the leadership label, and runs the leader election loop.
 // It logs its own errors before returning.
 func RunElection(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
-	klog.InfoS("starting leader-labeler",
-		"election_name", cfg.ElectionName,
-		"namespace", cfg.PodNamespace,
-		"pod_name", cfg.PodName)
-
 	// Wait for this pod to become Ready
 	if err := waitForReadyPod(ctx, client, cfg); err != nil {
 		klog.ErrorS(err, "failed waiting for pod readiness")
@@ -49,6 +44,10 @@ func RunElection(ctx context.Context, client kubernetes.Interface, cfg *Config) 
 
 // runLeaderElectionLoop runs the leader election, retrying on failure until context is cancelled.
 func runLeaderElectionLoop(ctx context.Context, client kubernetes.Interface, cfg *Config) {
+	klog.InfoS("starting leader election loop",
+		"election_name", cfg.ElectionName,
+		"namespace", cfg.PodNamespace,
+		"pod_name", cfg.PodName)
 	for ctx.Err() == nil {
 		// Create a cancellable context for this election cycle
 		electionCtx, electionCancel := context.WithCancel(ctx)
