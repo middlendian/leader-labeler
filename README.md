@@ -51,7 +51,57 @@ kubectl apply -f example/deployment.yaml
 kubectl apply -f example/service.yaml
 ```
 
-### 4. Verify leader election
+
+
+## Quick Start
+
+### 1. Create/update a service account with the required permissions
+
+These need to be available in the pod namespace, for managing leases (locks) and updating labels.
+
+```yaml
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "create", "update"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "patch"]
+```
+
+See the example at [./example/rbac.yaml](./example/rbac.yaml).
+
+### 2. Add the sidecar to your replica set
+
+To use the default settings, add this to your manifest, replacing `my-app` with a unique election name relevant to
+your specific application (it will be used for the lease object).
+
+```yaml
+containers:
+- name: leader-labeler
+  image: ghcr.io/middlendian/leader-labeler:latest # or a specific tag/SHA
+  args:
+  - "--election-name=my-app"
+```
+
+See the example at [./example/deployment.yaml](./example/deployment.yaml).
+
+### 3. Use the label in pod selectors such as a Service
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+spec:
+  selector:
+    app: my-app
+    my-app/is-leader: "true"  # <-- For routing traffic to the leader pod
+```
+
+See the example at [./example/service.yaml](./example/service.yaml).
+
+### 4. Verify leader election and labels
 
 ```bash
 # Check which pod is the leader
@@ -61,77 +111,86 @@ kubectl get pods -l app=my-app --show-labels
 kubectl logs -f <pod-name> -c leader-labeler
 ```
 
-## Installation
 
-### Using Pre-built Container Image
+## Configuration Details
+
+### Command-Line Parameters
+
+| Parameter | Required | Default | Description                                                                         |
+|-----------|----------|---------|-------------------------------------------------------------------------------------|
+| `--election-name` | Yes | - | Unique name for this election group. Used as the lease name and label prefix.       |
+| `--pod-name` | No | Auto-detected | Name of the current pod. Auto-detected from hostname.                               |
+| `--pod-namespace` | No | Auto-detected | Namespace of the pod and lease. Auto-detected from service account token.           |
+| `--leadership-label` | No | `<election-name>/is-leader` | Label key for leader status (`true` or `false`).                                    |
+| `--lease-duration` | No | `15s` | How long non-leaders wait before attempting to acquire leadership.                  |
+| `--timeout-deadline` | No | `10s` | How long the leader has to renew leadership (and related actions) before giving up. |
+| `--retry-interval` | No | `2s` | How often to retry leadership actions.                                              |
+
+### Auto-Detection
+
+The sidecar automatically detects pod name and namespace at runtime:
+
+- **Namespace**: Read from `/var/run/secrets/kubernetes.io/serviceaccount/namespace` (the service account token mount)
+- **Pod name**: Uses the container hostname, which Kubernetes sets to the pod name by default
+
+### Explicit Pod Name and/or Namespace
+
+If your pod uses a custom hostname (e.g., `hostNetwork: true` or explicit `hostname` field), you can use the
+Kubernetes Downward API to pass the pod name explicitly:
 
 ```yaml
 containers:
 - name: leader-labeler
   image: ghcr.io/middlendian/leader-labeler:latest
   args:
-  - --election-name=my-app
+  - "--election-name=my-app"
+  - "--pod-name=$(POD_NAME)"
   env:
   - name: POD_NAME
     valueFrom:
       fieldRef:
         fieldPath: metadata.name
+```
+
+The same approach works if namespace auto-detection doesn't work in your particular setup. Just provide an explicit
+pod namespace from the Downward API:
+
+```yaml
+containers:
+- name: leader-labeler
+  image: ghcr.io/middlendian/leader-labeler:latest
+  args:
+  - "--election-name=my-app"
+  - "--pod-namespace=$(POD_NAMESPACE)"
+  env:
   - name: POD_NAMESPACE
     valueFrom:
       fieldRef:
         fieldPath: metadata.namespace
 ```
 
-### Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/middlendian/leader-labeler.git
-cd leader-labeler
-
-# Build the binary
-make build
-
-# Run tests
-make test
-
-# Build Docker image
-make docker-build
-
-# Push to your registry
-export REGISTRY=your-registry.io/your-org
-make docker-push
-```
-
-## Configuration
-
-### Command-Line Parameters
-
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `--election-name` | Yes | - | Unique name for this election group. Used as the lease name and label prefix. |
-| `--pod-name` | No | `$POD_NAME` | Name of the current pod. Usually set via downward API. |
-| `--pod-namespace` | No | `$POD_NAMESPACE` | Namespace of the pod and lease. Usually set via downward API. |
-| `--leadership-label` | No | `<election-name>/is-leader` | Label key for leader status (`true` or `false`). |
-| `--lease-duration` | No | `15s` | How long non-leaders wait before attempting to acquire leadership. |
-| `--timeout-deadline` | No | `10s` | How long the leader has to renew leadership before giving up. |
-| `--retry-interval` | No | `2s` | How often to retry leadership actions. |
-
-### Environment Variables
-
-The sidecar requires these environment variables (typically set via Kubernetes downward API):
+### Custom Label Name
 
 ```yaml
-env:
-- name: POD_NAME
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.name
-- name: POD_NAMESPACE
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.namespace
+- name: leader-labeler
+  args:
+  - --election-name=database
+  - --leadership-label=db.example.com/primary
 ```
+
+### Tuning for Fast Failover
+
+```yaml
+- name: leader-labeler
+  args:
+  - --election-name=my-app
+  - --lease-duration=10s
+  - --timeout-deadline=5s
+  - --retry-interval=1s
+```
+
+**Note**: Shorter timeouts increase API server load. Use defaults unless you need faster failover.
+
 
 ## Usage Examples
 
@@ -161,15 +220,6 @@ spec:
         image: ghcr.io/middlendian/leader-labeler:latest
         args:
         - --election-name=my-app
-        env:
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
 ---
 apiVersion: v1
 kind: Service
@@ -183,64 +233,27 @@ spec:
   - port: 80
 ```
 
-### Custom Label Name
+## Leadership transfer scenarios 
 
-```yaml
-- name: leader-labeler
-  args:
-  - --election-name=database
-  - --leadership-label=db.example.com/primary
-```
-
-### Tuning for Fast Failover
-
-```yaml
-- name: leader-labeler
-  args:
-  - --election-name=my-app
-  - --lease-duration=10s
-  - --timeout-deadline=5s
-  - --retry-interval=1s
-```
-
-**Note**: Shorter timeouts increase API server load. Use defaults unless you need faster failover.
-
-## How It Works
-
-### Leader Election
+### At Pod Startup
 
 1. Each pod runs the leader-labeler sidecar
-2. Sidecars wait for the main container to become Ready
+2. Sidecars wait for the pod to become Ready, as determined by the other container(s)
 3. Ready pods apply the label `<election-name>/is-leader=false` to themselves
 4. Pods participate in leader election using Kubernetes Lease objects
 5. When a pod becomes leader, it reconciles all labels:
    - Sets `<election-name>/is-leader=true` on itself
    - Sets `<election-name>/is-leader=false` on all other pods with the label
 
-### Graceful Shutdown
+### Graceful Termination
 
-**Zero-downtime deployments** through clean shutdown handling:
+During normal operations such as draining a node or scheduled pod deletion, shutdown is handled gracefully:
 
-#### Any Pod Shutdown
-1. Receives SIGTERM
-2. Releases the lease (if leader)
-3. Terminates
+1. Pod receives SIGTERM
+2. If leader, pod releases the lease immediately
+3. An election is triggered within `retry-interval` (default 2s)
 
-With `maxSurge: 100%` rolling updates, new pods are Ready and participating in the election **before** SIGTERM is sent to old pods. This ensures:
-- A successor is always available to take over leadership
-- Leadership transfer happens within the `retry-interval` (default 2s)
-- No draining timeout logic is needed
-
-### Traffic Continuity
-
-For the leader to continue serving traffic during graceful shutdown, the **main container** must:
-
-- **Option A**: Keep its readiness probe passing during SIGTERM handling
-- **Option B**: Not have a readiness probe (use only liveness)
-
-This ensures the pod remains Ready and in the Service endpoints while waiting for a successor.
-
-## Rolling Update Strategy
+### Rolling Updates
 
 For zero-downtime deployments, use `maxSurge: 100%` to ensure new pods are Ready before old ones terminate:
 
@@ -260,26 +273,6 @@ strategy:
 5. Leadership transfers smoothly, old pods exit
 
 This approach temporarily doubles the number of pods during updates, but ensures successors are always available before any termination begins.
-
-## RBAC Requirements
-
-The sidecar requires these permissions in the pod's namespace:
-
-```yaml
-rules:
-- apiGroups: ["coordination.k8s.io"]
-  resources: ["leases"]
-  verbs: ["get", "create", "update"]
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "patch"]
-```
-
-Apply the included RBAC manifest:
-
-```bash
-kubectl apply -f example/rbac.yaml
-```
 
 ## Troubleshooting
 
@@ -318,13 +311,7 @@ kubectl logs -l app=my-app -c leader-labeler --tail=50
 - Ensure main container's readiness probe is passing
 - Check Service endpoints: `kubectl get endpoints <service-name>`
 
-## Contributing
-
-Contributions welcome! Please ensure:
-- All tests pass: `make test`
-- Code is formatted: `make fmt`
-- Linter passes: `make lint` (requires golangci-lint)
 
 ## License
 
-See [LICENSE](LICENSE) file for details
+GPLv3; See [LICENSE](LICENSE) file for details.
