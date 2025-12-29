@@ -185,11 +185,6 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-func TestSetupLogger(t *testing.T) {
-	// SetupLogger should not panic
-	SetupLogger()
-}
-
 func TestDetectPodName(t *testing.T) {
 	t.Run("returns hostname", func(t *testing.T) {
 		withMockedDetection(t, "my-pod-abc123", nil, "", nil, func() {

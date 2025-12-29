@@ -5,14 +5,17 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"k8s.io/klog/v2"
 )
 
 func main() {
-	SetupLogger()
+	// configure klog with defaults
+	klog.InitFlags(nil)
+	defer klog.Flush()
 
 	cfg, err := LoadConfig(os.Args[1:])
 	if err != nil {
@@ -31,7 +34,7 @@ func main() {
 	if err := RunElection(ctx, client, cfg); err != nil {
 		os.Exit(1) // RunElection logs its own errors
 	}
-	slog.Info("leader-labeler terminated")
+	klog.InfoS("leader-labeler terminated")
 }
 
 func setupSignalHandler(cancel context.CancelFunc) {
@@ -39,7 +42,7 @@ func setupSignalHandler(cancel context.CancelFunc) {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-sigChan
-		slog.Info("shutdown signal received")
+		klog.InfoS("shutdown signal received")
 		cancel()
 	}()
 }

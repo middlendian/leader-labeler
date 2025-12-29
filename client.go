@@ -6,13 +6,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 )
 
 // NewKubernetesClient creates an in-cluster Kubernetes client and validates RBAC permissions.
@@ -20,12 +20,12 @@ import (
 func NewKubernetesClient(ctx context.Context, cfg *Config) (kubernetes.Interface, error) {
 	client, err := buildClient()
 	if err != nil {
-		slog.Error("failed to build kubernetes client", "error", err)
+		klog.ErrorS(err, "failed to build kubernetes client")
 		return nil, err
 	}
 
 	if err := validatePermissions(ctx, client, cfg); err != nil {
-		slog.Error("RBAC permission validation failed", "error", err)
+		klog.ErrorS(err, "RBAC permission validation failed")
 		return nil, err
 	}
 
@@ -57,7 +57,7 @@ type permissionCheck struct {
 // It uses SelfSubjectAccessReview to verify each permission before the application starts.
 // Returns an error with detailed remediation instructions if any permission is missing.
 func validatePermissions(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
-	slog.Info("validating RBAC permissions")
+	klog.InfoS("validating RBAC permissions")
 
 	// Define all required permissions
 	checks := []permissionCheck{
@@ -90,7 +90,7 @@ func validatePermissions(ctx context.Context, client kubernetes.Interface, cfg *
 		return formatPermissionError(missingPermissions, cfg)
 	}
 
-	slog.Info("all required RBAC permissions validated successfully")
+	klog.InfoS("all required RBAC permissions validated successfully")
 	return nil
 }
 
@@ -116,7 +116,7 @@ func checkPermission(ctx context.Context, client kubernetes.Interface, cfg *Conf
 	}
 
 	if !result.Status.Allowed {
-		slog.Debug("permission check denied",
+		klog.V(4).InfoS("permission check denied",
 			"resource", check.Resource,
 			"apiGroup", check.APIGroup,
 			"verb", check.Verb,
