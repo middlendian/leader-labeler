@@ -83,8 +83,11 @@ func runLeaderElectionLoop(ctx context.Context, client kubernetes.Interface, cfg
 				},
 				OnStoppedLeading: func() {
 					slog.Warn("lost leadership", "pod_name", cfg.PodName)
-					// Immediately mark self as non-leader
-					if err := LabelPod(electionCtx, client, cfg, cfg.PodName, false); err != nil {
+					// Immediately mark self as non-leader.
+					// Use context.Background() because electionCtx may already be cancelled
+					// when this callback runs during termination, and we still need to
+					// remove the leader label before the pod shuts down.
+					if err := LabelPod(context.Background(), client, cfg, cfg.PodName, false); err != nil {
 						slog.Error("failed to remove leader label", "error", err, "label", cfg.LeadershipLabel)
 					}
 				},
