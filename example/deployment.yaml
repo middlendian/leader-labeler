@@ -28,7 +28,6 @@ spec:
         app: my-app
     spec:
       serviceAccountName: leader-labeler
-      terminationGracePeriodSeconds: 30  # Sidecar uses this for draining timeout
 
       containers:
       # Example main application container
@@ -38,18 +37,14 @@ spec:
         - containerPort: 80
           name: http
 
-        # IMPORTANT: For traffic continuity during leader draining:
-        # Option A: Configure readiness probe to keep passing during SIGTERM
-        # Option B: Omit readiness probe (use only liveness)
-        # This ensures leader pod stays Ready and continues serving traffic
-        # while waiting for successor during graceful shutdown
+        # IMPORTANT: We rely on readiness probes to determine when to join the leader election. Make sure to have an
+        # appropriate probe for your workload.
         readinessProbe:
           httpGet:
             path: /
             port: 80
           initialDelaySeconds: 5
           periodSeconds: 5
-          # App should continue passing readiness during SIGTERM
 
       # Leader-labeler sidecar
       - name: leader-labeler
