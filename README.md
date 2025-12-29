@@ -82,15 +82,6 @@ containers:
   image: ghcr.io/middlendian/leader-labeler:latest # or a specific tag/SHA
   args:
   - "--election-name=my-app"
-  env:
-  - name: POD_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.name
-  - name: POD_NAMESPACE
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.namespace
 ```
 
 See the example at [./example/deployment.yaml](./example/deployment.yaml).
@@ -128,28 +119,78 @@ kubectl logs -f <pod-name> -c leader-labeler
 | Parameter | Required | Default | Description                                                                         |
 |-----------|----------|---------|-------------------------------------------------------------------------------------|
 | `--election-name` | Yes | - | Unique name for this election group. Used as the lease name and label prefix.       |
-| `--pod-name` | No | `$POD_NAME` | Name of the current pod. Usually set via downward API.                              |
-| `--pod-namespace` | No | `$POD_NAMESPACE` | Namespace of the pod and lease. Usually set via downward API.                       |
+| `--pod-name` | No | Auto-detected | Name of the current pod. Auto-detected from hostname.                               |
+| `--pod-namespace` | No | Auto-detected | Namespace of the pod and lease. Auto-detected from service account token.           |
 | `--leadership-label` | No | `<election-name>/is-leader` | Label key for leader status (`true` or `false`).                                    |
 | `--lease-duration` | No | `15s` | How long non-leaders wait before attempting to acquire leadership.                  |
 | `--timeout-deadline` | No | `10s` | How long the leader has to renew leadership (and related actions) before giving up. |
 | `--retry-interval` | No | `2s` | How often to retry leadership actions.                                              |
 
-### Environment Variables
+### Auto-Detection
 
-The sidecar uses these environment variables (typically set via Kubernetes downward API):
+The sidecar automatically detects pod name and namespace at runtime:
+
+- **Namespace**: Read from `/var/run/secrets/kubernetes.io/serviceaccount/namespace` (the service account token mount)
+- **Pod name**: Uses the container hostname, which Kubernetes sets to the pod name by default
+
+### Explicit Pod Name and/or Namespace
+
+If your pod uses a custom hostname (e.g., `hostNetwork: true` or explicit `hostname` field), you can use the
+Kubernetes Downward API to pass the pod name explicitly:
 
 ```yaml
-env:
-- name: POD_NAME
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.name
-- name: POD_NAMESPACE
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.namespace
+containers:
+- name: leader-labeler
+  image: ghcr.io/middlendian/leader-labeler:latest
+  args:
+  - "--election-name=my-app"
+  - "--pod-name=$(POD_NAME)"
+  env:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
 ```
+
+The same approach works if namespace auto-detection doesn't work in your particular setup. Just provide an explicit
+pod namespace from the Downward API:
+
+```yaml
+containers:
+- name: leader-labeler
+  image: ghcr.io/middlendian/leader-labeler:latest
+  args:
+  - "--election-name=my-app"
+  - "--pod-namespace=$(POD_NAMESPACE)"
+  env:
+  - name: POD_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+```
+
+### Custom Label Name
+
+```yaml
+- name: leader-labeler
+  args:
+  - --election-name=database
+  - --leadership-label=db.example.com/primary
+```
+
+### Tuning for Fast Failover
+
+```yaml
+- name: leader-labeler
+  args:
+  - --election-name=my-app
+  - --lease-duration=10s
+  - --timeout-deadline=5s
+  - --retry-interval=1s
+```
+
+**Note**: Shorter timeouts increase API server load. Use defaults unless you need faster failover.
+
 
 ## Usage Examples
 
@@ -179,15 +220,6 @@ spec:
         image: ghcr.io/middlendian/leader-labeler:latest
         args:
         - --election-name=my-app
-        env:
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
 ---
 apiVersion: v1
 kind: Service
@@ -200,28 +232,6 @@ spec:
   ports:
   - port: 80
 ```
-
-### Custom Label Name
-
-```yaml
-- name: leader-labeler
-  args:
-  - --election-name=database
-  - --leadership-label=db.example.com/primary
-```
-
-### Tuning for Fast Failover
-
-```yaml
-- name: leader-labeler
-  args:
-  - --election-name=my-app
-  - --lease-duration=10s
-  - --timeout-deadline=5s
-  - --retry-interval=1s
-```
-
-**Note**: Shorter timeouts increase API server load. Use defaults unless you need faster failover.
 
 ## Leadership transfer scenarios 
 
