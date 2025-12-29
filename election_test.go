@@ -501,6 +501,136 @@ func TestRunElection_LeadershipAcquisition_TrackPatches(t *testing.T) {
 	t.Logf("total patch operations: %d", patches)
 }
 
+func TestOnStoppedLeading_RemovesLabelOnContextCancel(t *testing.T) {
+	// This test verifies that when the context is cancelled (e.g., pod termination),
+	// the OnStoppedLeading callback successfully removes the is-leader label.
+	// This requires using context.Background() in OnStoppedLeading, not electionCtx,
+	// because electionCtx is already cancelled by the time OnStoppedLeading runs.
+	//
+	// The bug: OnStoppedLeading uses electionCtx which is derived from the main context.
+	// When the main context is cancelled, electionCtx is also cancelled, so:
+	// 1. The Patch API call fails (simulated via reactor returning error)
+	// 2. LabelPod's retry loop checks ctx.Done() - with cancelled context, returns ctx.Err()
+	// 3. The leader label never gets removed
+	//
+	// To test this, we fail the first Patch attempt after termination, forcing the
+	// retry loop to kick in. With a cancelled context (bug), it returns immediately.
+	// With context.Background() (fix), it retries and succeeds.
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"test/is-leader": "false"},
+		},
+		Status: corev1.PodStatus{
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	client := fake.NewClientset(pod)
+
+	// Track state
+	var becameLeader atomic.Bool
+	var terminationTriggered atomic.Bool
+	var labelRemovalAttempts atomic.Int32
+
+	client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		patchAction := action.(k8stesting.PatchAction)
+		patchBytes := string(patchAction.GetPatch())
+
+		if patchBytes == `{"metadata":{"labels":{"test/is-leader":"true"}}}` {
+			becameLeader.Store(true)
+			return false, nil, nil
+		}
+
+		// After termination is triggered, fail the FIRST label removal attempt
+		// to force the retry loop. This simulates real API transient failure.
+		if terminationTriggered.Load() && patchBytes == `{"metadata":{"labels":{"test/is-leader":"false"}}}` {
+			attempts := labelRemovalAttempts.Add(1)
+			if attempts == 1 {
+				// First attempt fails - this forces LabelPod into its retry loop
+				// With buggy code (electionCtx cancelled): retry loop sees ctx.Done(), returns ctx.Err()
+				// With fixed code (context.Background()): retry loop waits and retries, succeeds
+				return true, nil, errors.New("simulated transient API failure")
+			}
+			// Second attempt succeeds
+			return false, nil, nil
+		}
+
+		return false, nil, nil
+	})
+
+	cfg := &Config{
+		PodName:         "test-pod",
+		PodNamespace:    "default",
+		ElectionName:    "test-election",
+		LeadershipLabel: "test/is-leader",
+		LeaseDuration:   1 * time.Second,
+		TimeoutDeadline: 800 * time.Millisecond,
+		RetryInterval:   50 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunElection(ctx, client, cfg)
+	}()
+
+	// Wait until we become leader
+	deadline := time.Now().Add(testTimeout)
+	for !becameLeader.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !becameLeader.Load() {
+		t.Fatal("timed out waiting to become leader")
+	}
+
+	// Verify we're labeled as leader
+	leaderPod, _ := client.CoreV1().Pods("default").Get(context.Background(), "test-pod", metav1.GetOptions{})
+	if leaderPod.Labels["test/is-leader"] != "true" {
+		t.Fatalf("expected pod to be labeled as leader, got %q", leaderPod.Labels["test/is-leader"])
+	}
+
+	// Now cancel the context to trigger termination
+	terminationTriggered.Store(true)
+	cancel()
+
+	// Wait for election to complete
+	select {
+	case <-done:
+	case <-time.After(testTimeout):
+		t.Fatal("test timed out waiting for election to stop")
+	}
+
+	// Give a moment for any async operations
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify the final state of the pod
+	updatedPod, err := client.CoreV1().Pods("default").Get(context.Background(), "test-pod", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get pod: %v", err)
+	}
+
+	// The key assertion: after termination, the pod MUST be labeled as non-leader
+	if updatedPod.Labels["test/is-leader"] != "false" {
+		t.Errorf("pod label = %q after termination, want %q; "+
+			"OnStoppedLeading likely used electionCtx (cancelled) instead of context.Background()",
+			updatedPod.Labels["test/is-leader"], "false")
+	}
+
+	// Verify that retry was attempted (should be at least 2 attempts with fix, 1 with bug)
+	attempts := labelRemovalAttempts.Load()
+	if attempts < 2 {
+		t.Errorf("expected at least 2 label removal attempts (retry after failure), got %d; "+
+			"this suggests the retry loop exited early due to cancelled context", attempts)
+	}
+}
+
 func TestRunElection_ApplyAllLabelsFails_ReleasesLeadership(t *testing.T) {
 	// Create leader pod and a follower pod
 	leaderPod := &corev1.Pod{
