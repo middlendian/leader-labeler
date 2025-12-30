@@ -39,8 +39,17 @@ func LabelPod(ctx context.Context, client kubernetes.Interface, cfg *Config, pod
 
 	for {
 		_, err := client.CoreV1().Pods(cfg.PodNamespace).Patch(ctx, podName,
-			types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
+			types.MergePatchType, patchBytes, metav1.PatchOptions{})
 		if err == nil {
+			// Verify the label was actually updated
+			updatedPod, getErr := client.CoreV1().Pods(cfg.PodNamespace).Get(ctx, podName, metav1.GetOptions{})
+			if getErr != nil {
+				klog.Warningf("failed to verify label update; error=%v pod_name=%s", getErr, podName)
+				// Don't fail - the patch succeeded, verification is best-effort
+			} else if updatedPod.Labels[cfg.LeadershipLabel] != leaderValue {
+				return fmt.Errorf("label verification failed: expected %s=%s, got %s",
+					cfg.LeadershipLabel, leaderValue, updatedPod.Labels[cfg.LeadershipLabel])
+			}
 			klog.InfoS("labeled pod",
 				"pod_name", podName,
 				cfg.LeadershipLabel, leaderValue)

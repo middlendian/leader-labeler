@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -428,6 +430,296 @@ func TestReconcileLabels_SkipsCorrectlyLabeledPods(t *testing.T) {
 				}
 				if !found {
 					t.Errorf("expected pod %s to be patched, but it wasn't. Patched pods: %v", want, patchedPods)
+				}
+			}
+		})
+	}
+}
+
+func TestLabelPod_UpdateExistingLabel(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialValue  string
+		newValue      bool
+		expectedValue string
+	}{
+		{
+			name:          "update label false to true",
+			initialValue:  "false",
+			newValue:      true,
+			expectedValue: "true",
+		},
+		{
+			name:          "update label true to false",
+			initialValue:  "true",
+			newValue:      false,
+			expectedValue: "false",
+		},
+		{
+			name:          "update label true to true (no change)",
+			initialValue:  "true",
+			newValue:      true,
+			expectedValue: "true",
+		},
+		{
+			name:          "update label false to false (no change)",
+			initialValue:  "false",
+			newValue:      false,
+			expectedValue: "false",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create pod with EXISTING label value
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Labels: map[string]string{
+						"test/is-leader": tt.initialValue,
+					},
+				},
+			}
+
+			client := fake.NewClientset(pod)
+
+			cfg := &Config{
+				PodNamespace:    "default",
+				LeadershipLabel: "test/is-leader",
+				RetryInterval:   10 * time.Millisecond,
+				TimeoutDeadline: 100 * time.Millisecond,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+
+			err := LabelPod(ctx, client, cfg, "test-pod", tt.newValue)
+			if err != nil {
+				t.Errorf("LabelPod() unexpected error: %v", err)
+				return
+			}
+
+			// Verify the label was actually updated
+			updatedPod, err := client.CoreV1().Pods("default").Get(ctx, "test-pod", metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("failed to get pod: %v", err)
+			}
+
+			if updatedPod.Labels[cfg.LeadershipLabel] != tt.expectedValue {
+				t.Errorf("label %s = %q, want %q (label update may have silently failed)",
+					cfg.LeadershipLabel,
+					updatedPod.Labels[cfg.LeadershipLabel],
+					tt.expectedValue)
+			}
+		})
+	}
+}
+
+func TestLabelPod_PatchPayloadStructure(t *testing.T) {
+	tests := []struct {
+		name          string
+		isLeader      bool
+		expectedPatch string
+	}{
+		{
+			name:          "patch for leader",
+			isLeader:      true,
+			expectedPatch: `{"metadata":{"labels":{"test/is-leader":"true"}}}`,
+		},
+		{
+			name:          "patch for non-leader",
+			isLeader:      false,
+			expectedPatch: `{"metadata":{"labels":{"test/is-leader":"false"}}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Labels:    map[string]string{"test/is-leader": "initial"},
+				},
+			}
+
+			client := fake.NewClientset(pod)
+
+			var capturedPatch []byte
+			var capturedPatchType types.PatchType
+
+			client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				patchAction := action.(k8stesting.PatchAction)
+				capturedPatch = patchAction.GetPatch()
+				capturedPatchType = patchAction.GetPatchType()
+				return false, nil, nil // Let default handler process
+			})
+
+			cfg := &Config{
+				PodNamespace:    "default",
+				LeadershipLabel: "test/is-leader",
+				RetryInterval:   10 * time.Millisecond,
+				TimeoutDeadline: 100 * time.Millisecond,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+
+			err := LabelPod(ctx, client, cfg, "test-pod", tt.isLeader)
+			if err != nil {
+				t.Fatalf("LabelPod() error: %v", err)
+			}
+
+			// Verify patch type is MergePatchType (not StrategicMergePatchType)
+			if capturedPatchType != types.MergePatchType {
+				t.Errorf("patch type = %v, want %v", capturedPatchType, types.MergePatchType)
+			}
+
+			// Verify patch payload structure
+			if string(capturedPatch) != tt.expectedPatch {
+				t.Errorf("patch payload = %s, want %s", string(capturedPatch), tt.expectedPatch)
+			}
+		})
+	}
+}
+
+func TestLabelPod_PreservesOtherLabels(t *testing.T) {
+	// Create pod with multiple labels
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels: map[string]string{
+				"test/is-leader": "false",
+				"app":            "myapp",
+				"version":        "v1.0.0",
+				"environment":    "staging",
+			},
+		},
+	}
+
+	client := fake.NewClientset(pod)
+
+	cfg := &Config{
+		PodNamespace:    "default",
+		LeadershipLabel: "test/is-leader",
+		RetryInterval:   10 * time.Millisecond,
+		TimeoutDeadline: 100 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	err := LabelPod(ctx, client, cfg, "test-pod", true)
+	if err != nil {
+		t.Fatalf("LabelPod() error: %v", err)
+	}
+
+	// Verify all labels
+	updatedPod, err := client.CoreV1().Pods("default").Get(ctx, "test-pod", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get pod: %v", err)
+	}
+
+	expectedLabels := map[string]string{
+		"test/is-leader": "true", // Changed
+		"app":            "myapp",
+		"version":        "v1.0.0",
+		"environment":    "staging",
+	}
+
+	for key, expectedValue := range expectedLabels {
+		if updatedPod.Labels[key] != expectedValue {
+			t.Errorf("label %s = %q, want %q", key, updatedPod.Labels[key], expectedValue)
+		}
+	}
+}
+
+func TestApplyAllLabels_UpdatesExistingLabels(t *testing.T) {
+	// Scenario: Former leader needs label changed from true to false,
+	// new leader needs label changed from false to true
+	tests := []struct {
+		name         string
+		selfPodName  string
+		existingPods []*corev1.Pod
+		wantLabels   map[string]string
+	}{
+		{
+			name:        "former leader becomes follower, follower becomes leader",
+			selfPodName: "new-leader",
+			existingPods: []*corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "new-leader",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "false"}, // Needs: false -> true
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "old-leader",
+						Namespace: "default",
+						Labels:    map[string]string{"test/is-leader": "true"}, // Needs: true -> false
+					},
+				},
+			},
+			wantLabels: map[string]string{
+				"new-leader": "true",
+				"old-leader": "false",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objects := make([]runtime.Object, len(tt.existingPods))
+			for i, pod := range tt.existingPods {
+				objects[i] = pod
+			}
+
+			client := fake.NewClientset(objects...)
+
+			// Track what patches are applied
+			var patchedPods []string
+			var patchMutex sync.Mutex
+
+			client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				patchAction := action.(k8stesting.PatchAction)
+				patchMutex.Lock()
+				patchedPods = append(patchedPods, patchAction.GetName())
+				patchMutex.Unlock()
+				return false, nil, nil
+			})
+
+			cfg := &Config{
+				PodName:         tt.selfPodName,
+				PodNamespace:    "default",
+				LeadershipLabel: "test/is-leader",
+				RetryInterval:   10 * time.Millisecond,
+				TimeoutDeadline: 100 * time.Millisecond,
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+
+			err := ApplyAllLabels(ctx, client, cfg)
+			if err != nil {
+				t.Fatalf("ApplyAllLabels() error: %v", err)
+			}
+
+			// Verify all final label values
+			for podName, expectedValue := range tt.wantLabels {
+				pod, err := client.CoreV1().Pods("default").Get(ctx, podName, metav1.GetOptions{})
+				if err != nil {
+					t.Errorf("failed to get pod %s: %v", podName, err)
+					continue
+				}
+
+				actualValue := pod.Labels[cfg.LeadershipLabel]
+				if actualValue != expectedValue {
+					t.Errorf("pod %s label = %q, want %q (label update may have failed)",
+						podName, actualValue, expectedValue)
 				}
 			}
 		})
