@@ -54,7 +54,7 @@ func runLeaderElectionLoop(ctx context.Context, client kubernetes.Interface, cfg
 
 		lock := &resourcelock.LeaseLock{
 			LeaseMeta: metav1.ObjectMeta{
-				Name:      cfg.ElectionName,
+				Name:      cfg.ElectionName + "-lock",
 				Namespace: cfg.PodNamespace,
 			},
 			Client: client.CoordinationV1(),
