@@ -19,9 +19,15 @@ const (
 	ElectionRetryBackoff = 100 * time.Millisecond
 )
 
-// RunElection waits for pod readiness, initializes the leadership label, and runs the leader election loop.
+// RunElection initializes the leadership label, waits for pod readiness, and runs the leader election loop.
 // It logs its own errors before returning.
 func RunElection(ctx context.Context, client kubernetes.Interface, cfg *Config) error {
+	// Apply initial non-leader label immediately (before waiting for readiness)
+	if err := LabelPod(ctx, client, cfg, cfg.PodName, false); err != nil {
+		klog.ErrorS(err, "failed to apply initial leader label", "label", cfg.LeadershipLabel)
+		return err
+	}
+
 	// Wait for this pod to become Ready
 	if err := waitForReadyPod(ctx, client, cfg); err != nil {
 		klog.ErrorS(err, "failed waiting for pod readiness")
@@ -29,12 +35,6 @@ func RunElection(ctx context.Context, client kubernetes.Interface, cfg *Config) 
 	}
 
 	klog.InfoS("pod ready, joining election")
-
-	// Apply initial leader label (false) to this pod
-	if err := LabelPod(ctx, client, cfg, cfg.PodName, false); err != nil {
-		klog.ErrorS(err, "failed to apply initial leader label", "label", cfg.LeadershipLabel)
-		return err
-	}
 
 	// Run the leader election loop
 	runLeaderElectionLoop(ctx, client, cfg)
