@@ -252,6 +252,71 @@ func TestRunElection_InitialSetup(t *testing.T) {
 	}
 }
 
+func TestRunElection_LabelsBeforeReady(t *testing.T) {
+	// Test that RunElection applies the label immediately, before waiting for readiness
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels:    map[string]string{},
+		},
+		Status: corev1.PodStatus{
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+			},
+		},
+	}
+
+	client := fake.NewClientset(pod)
+
+	cfg := &Config{
+		PodName:         "test-pod",
+		PodNamespace:    "default",
+		ElectionName:    "test-election",
+		LeadershipLabel: "test/is-leader",
+		LeaseDuration:   15 * time.Second,
+		TimeoutDeadline: 10 * time.Second,
+		RetryInterval:   50 * time.Millisecond,
+	}
+
+	// Track when the label patch and readiness check happen
+	var labelApplied, readinessChecked int64
+	var labelOrder, readinessOrder int64
+	var orderCounter int64
+
+	client.PrependReactor("patch", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		atomic.StoreInt64(&labelApplied, 1)
+		atomic.StoreInt64(&labelOrder, atomic.AddInt64(&orderCounter, 1))
+		return false, nil, nil // Let default handler process
+	})
+
+	client.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if atomic.LoadInt64(&readinessChecked) == 0 {
+			atomic.StoreInt64(&readinessChecked, 1)
+			atomic.StoreInt64(&readinessOrder, atomic.AddInt64(&orderCounter, 1))
+		}
+		return false, nil, nil // Let default handler return the pod
+	})
+
+	// Use a short timeout since pod will never become ready
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_ = RunElection(ctx, client, cfg)
+
+	// Verify label was applied
+	if atomic.LoadInt64(&labelApplied) != 1 {
+		t.Error("label was not applied")
+	}
+
+	// Verify label was applied before readiness was checked
+	lo := atomic.LoadInt64(&labelOrder)
+	ro := atomic.LoadInt64(&readinessOrder)
+	if lo >= ro {
+		t.Errorf("label was applied (order=%d) after readiness check (order=%d), want label first", lo, ro)
+	}
+}
+
 func TestWaitForReadyPod_RetriesOnGetError(t *testing.T) {
 	// Create a ready pod
 	pod := &corev1.Pod{
@@ -340,6 +405,16 @@ func TestRunElection_WaitForReadyFails(t *testing.T) {
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("RunElection() error = %v, want context.DeadlineExceeded", err)
+	}
+
+	// Verify the label was still applied before the readiness check failed
+	updatedPod, err := client.CoreV1().Pods("default").Get(context.Background(), "test-pod", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get pod: %v", err)
+	}
+	if updatedPod.Labels[cfg.LeadershipLabel] != "false" {
+		t.Errorf("pod label = %q, want %q (label should be applied before readiness check)",
+			updatedPod.Labels[cfg.LeadershipLabel], "false")
 	}
 }
 
